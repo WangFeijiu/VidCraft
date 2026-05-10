@@ -399,10 +399,10 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
   <div class="modal" style="width:800px;max-width:90vw;max-height:90vh;display:flex;flex-direction:column;position:relative">
     <button onclick="document.getElementById('modal-compare').classList.add('hidden')" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:24px;cursor:pointer;color:#888;padding:4px 8px;line-height:1">×</button>
     <h3 style="padding-right:40px">版本对比</h3>
-    <div style="display:flex;gap:12px;margin-bottom:16px">
+    <div style="display:flex;gap:12px;margin-bottom:16px;align-items:flex-end">
       <div style="flex:1">
         <label style="font-size:13px;color:#666;margin-bottom:4px;display:block">版本 A</label>
-        <select id="compare-version-a" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px">
+        <select id="compare-version-a" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;height:38px;box-sizing:border-box;margin:0">
           <option value="original">原始转写</option>
           <option value="optimized">AI 优化</option>
           <option value="uploaded">用户上传</option>
@@ -410,13 +410,13 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       </div>
       <div style="flex:1">
         <label style="font-size:13px;color:#666;margin-bottom:4px;display:block">版本 B</label>
-        <select id="compare-version-b" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px">
+        <select id="compare-version-b" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;height:38px;box-sizing:border-box;margin:0">
           <option value="original">原始转写</option>
           <option value="optimized" selected>AI 优化</option>
           <option value="uploaded">用户上传</option>
         </select>
       </div>
-      <button class="primary" onclick="doCompare()" style="align-self:flex-end;padding:8px 16px">对比</button>
+      <button class="primary" onclick="doCompare()" style="padding:0 16px;height:38px;box-sizing:border-box;margin:0">对比</button>
     </div>
     <div id="compare-body" style="flex:1;overflow-y:auto"></div>
   </div>
@@ -1000,11 +1000,13 @@ async function doOptimize() {
 }
 
 function showOptimizeInput() {
+  const versionNames = {original: '原始转写', optimized: 'AI 优化', uploaded: '用户上传'};
   return new Promise((resolve) => {
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
     modal.innerHTML = `<div class="modal" style="max-width:500px">
       <h3>AI 优化字幕</h3>
+      <p style="margin:8px 0;font-size:13px;color:#888">当前版本：<span style="color:#007bff;font-weight:500">${versionNames[activeVersion]||activeVersion}</span>（${sentences.length} 句）</p>
       <p style="margin:12px 0;color:#666;line-height:1.6">请简要描述这个视频的内容，帮助 AI 更好地理解语境：</p>
       <textarea id="opt-desc-input" rows="3" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:14px;resize:vertical" placeholder="例如：这是一个介绍如何使用 Notion 做笔记的教程视频"></textarea>
       <p style="margin-top:8px;color:#aaa;font-size:12px">留空也可以，AI 会自动分析内容</p>
@@ -1282,14 +1284,8 @@ function showCompareResult(titleA, dataA, titleB, dataB) {
     }
     leftHtml += '</div>';
 
-    // Middle: comparison indicator (only show when different or missing)
-    let middleHtml = '<div style="text-align:center;color:#888;font-size:20px">';
-    if(!sentA || !sentB) {
-      middleHtml += '✗';
-    } else if(sentA.text !== sentB.text) {
-      middleHtml += '≠';
-    }
-    middleHtml += '</div>';
+    // Middle: empty column (user checks differences themselves)
+    const middleHtml = '<div></div>';
 
     // Right: version B
     let rightHtml = '<div>';
