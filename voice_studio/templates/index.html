@@ -2205,7 +2205,7 @@ function renderI2VUploadPreview() {
       ondrop="i2vPreviewDrop(event,${i})" ondragend="i2vPreviewDragEnd(event)">
       <div class="img-idx">${i+1}</div>
       <button class="img-remove" onclick="removeI2VFile(${i})">×</button>
-      <img src="${url}" alt="">
+      <img src="${url}" alt="" draggable="false">
       <div class="img-name">${escHtml(f.name)}</div>
     </div>`;
   }).join('');
@@ -2326,6 +2326,8 @@ async function refreshI2VWork() {
     body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px">✅</div><h3 style="margin:12px 0">视频已生成</h3><a href="${API}/api/img2vid/${curI2V}/download" class="primary" style="display:inline-block;padding:12px 32px;text-decoration:none;border-radius:8px;background:#6c5ce7;color:#fff">⬇ 下载视频 (MP4)</a><p style="margin-top:16px"><button onclick="curI2V=null;show('v-empty')">返回</button></p></div>`;
   } else if(st.stage === 'error') {
     body.innerHTML = `<div class="card" style="padding:24px;color:#d9534f"><b>错误：</b><br>${(st.msg||'').replace(/\n/g,'<br>')}</div>`;
+  } else {
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">⏳</div><p style="margin-top:12px">${st.msg||'加载中...'}</p></div>`;
   }
 }
 
@@ -2347,7 +2349,7 @@ function renderI2VImages(body, st) {
       ondragenter="i2vProjDragEnter(event)" ondragleave="i2vProjDragLeave(event)"
       ondrop="i2vProjDrop(event,${i})" ondragend="i2vProjDragEnd(event)">
       <div class="img-idx">${i+1}</div>
-      <img src="${API}${img.url}" alt="图片${i+1}" onclick="showImageZoom('${API}${img.url}')" style="cursor:zoom-in">
+      <img src="${API}${img.url}" alt="图片${i+1}" onclick="showImageZoom('${API}${img.url}')" style="cursor:zoom-in" draggable="false">
       <div class="img-ctrl">
         <button onclick="i2vMove(${i},-1)" ${i===0?'disabled':''}>↑</button>
         <button onclick="i2vMove(${i},1)" ${i===i2vImages.length-1?'disabled':''}>↓</button>
@@ -2406,6 +2408,10 @@ function renderI2VNarration(body, st) {
 
   html += `<div style="margin-top:20px;padding-top:20px;border-top:1px solid #eee">
     <p style="font-weight:500;margin-bottom:12px">声纹设置</p>
+    <div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px">
+      <p style="color:#666;font-size:13px;margin-bottom:8px">请朗读下方文字录制声纹，用于视频配音音色：</p>
+      <div style="padding:10px;background:#fff;border-radius:6px;border:1px solid #ddd;color:#333;font-size:14px;line-height:1.6">大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。</div>
+    </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <button id="i2v-voice-btn" onclick="toggleI2VVoice()">🎙 录制声纹</button>
       <button onclick="document.getElementById('i2v-voice-file').click()">📁 上传声纹</button>
@@ -2413,6 +2419,7 @@ function renderI2VNarration(body, st) {
       <span id="i2v-voice-status" style="color:#888;font-size:13px">未录制将使用默认声纹</span>
     </div>
     <audio id="i2v-voice-player" controls style="width:100%;margin:8px 0;display:none"></audio>
+    <p id="i2v-voice-confirm" style="display:none;color:#2a9d3f;font-size:13px;margin-top:4px">✓ 声纹已就绪，点击下方"生成视频"开始制作</p>
   </div>`;
 
   html += `<div style="margin-top:16px;display:flex;gap:8px">
@@ -2438,6 +2445,9 @@ async function toggleI2VVoice() {
       p.src = URL.createObjectURL(i2vVoiceBlob); p.style.display = 'block';
       document.getElementById('i2v-voice-status').textContent = '已录制';
       document.getElementById('i2v-voice-status').classList.add('ok');
+      document.getElementById('i2v-voice-confirm').style.display = 'block';
+      // Auto-play for user to review
+      p.play().catch(()=>{});
     };
     rec.start(); i2vVoiceRecording = true;
     document.getElementById('i2v-voice-btn').textContent = '⏹ 停止';
@@ -2452,6 +2462,7 @@ function onI2VVoiceFile(e) {
   p.src = URL.createObjectURL(f); p.style.display = 'block';
   document.getElementById('i2v-voice-status').textContent = f.name;
   document.getElementById('i2v-voice-status').classList.add('ok');
+  document.getElementById('i2v-voice-confirm').style.display = 'block';
 }
 
 async function generateI2V() {
