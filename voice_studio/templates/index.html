@@ -242,6 +242,9 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
     <div class="card" id="cv-video-area" style="margin-bottom:16px;padding:0;overflow:hidden;display:none">
       <video id="cv-video" controls style="width:100%;max-height:360px;display:block"></video>
     </div>
+    <div id="cv-reupload-bar" style="display:none;margin-bottom:12px;text-align:right">
+      <button onclick="showConvert()" style="font-size:12px;padding:4px 12px;color:#888">🗑 重新上传视频</button>
+    </div>
     <div class="card" id="cv-op-area" style="display:none">
       <p style="color:#888;margin-bottom:12px">将视频转换为其他格式或分辨率</p>
       <label style="display:block;margin:8px 0 4px;font-weight:500">输出格式</label>
@@ -281,6 +284,12 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <button class="primary" onclick="document.getElementById('ve-upload-file').click()">选择视频</button>
     </div>
     <div class="card" id="ve-video-area" style="margin-bottom:16px;padding:0;overflow:hidden;display:none">
+      <video id="ve-video" controls style="width:100%;max-height:360px;display:block"></video>
+    </div>
+    <div id="ve-reupload-bar" style="display:none;margin-bottom:12px;text-align:right">
+      <button onclick="showVEditor()" style="font-size:12px;padding:4px 12px;color:#888">🗑 重新上传视频</button>
+    </div>
+    <div class="card" id="ve-op-area" style="display:none">
       <video id="ve-video" controls style="width:100%;max-height:360px;display:block"></video>
     </div>
     <div class="card" id="ve-op-area" style="display:none">
@@ -2340,7 +2349,7 @@ function renderI2VImages(body, st) {
       ondragenter="i2vProjDragEnter(event)" ondragleave="i2vProjDragLeave(event)"
       ondrop="i2vProjDrop(event,${i})" ondragend="i2vProjDragEnd(event)">
       <div class="img-idx">${i+1}</div>
-      <img src="${API}${img.url}" alt="图片${i+1}">
+      <img src="${API}${img.url}" alt="图片${i+1}" onclick="showImageZoom('${API}${img.url}')" style="cursor:zoom-in">
       <div class="img-ctrl">
         <button onclick="i2vMove(${i},-1)" ${i===0?'disabled':''}>↑</button>
         <button onclick="i2vMove(${i},1)" ${i===i2vImages.length-1?'disabled':''}>↓</button>
@@ -2489,6 +2498,7 @@ async function onToolUpload(input, tool) {
     if(tool === 'convert') {
       document.getElementById('cv-upload-area').style.display = 'none';
       document.getElementById('cv-video-area').style.display = 'block';
+      document.getElementById('cv-reupload-bar').style.display = 'block';
       document.getElementById('cv-op-area').style.display = 'block';
       document.getElementById('cv-video').src = API + '/api/tool/' + toolSid + '/video';
       document.getElementById('cv-download-btn').classList.add('hidden');
@@ -2496,6 +2506,7 @@ async function onToolUpload(input, tool) {
     } else {
       document.getElementById('ve-upload-area').style.display = 'none';
       document.getElementById('ve-video-area').style.display = 'block';
+      document.getElementById('ve-reupload-bar').style.display = 'block';
       document.getElementById('ve-op-area').style.display = 'block';
       document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video';
       document.getElementById('ve-download-btn').classList.add('hidden');
@@ -2878,6 +2889,25 @@ async function veReplaceAudio() {
 // ═══════════════════════════════════════════════════════════════
 function fmtS(s) { if(!s&&s!==0) return '?'; const m=Math.floor(s/60),sec=Math.floor(s%60); return m+':'+(sec<10?'0':'')+sec; }
 function escHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function showImageZoom(url) {
+  let modal = document.getElementById('img-zoom-modal');
+  if(!modal) {
+    modal = document.createElement('div');
+    modal.id = 'img-zoom-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+    modal.innerHTML = '<img id="img-zoom-img" style="max-width:90%;max-height:90%;object-fit:contain;border-radius:4px" onclick="event.stopPropagation()">';
+    modal.onclick = () => modal.style.display = 'none';
+    document.body.appendChild(modal);
+  }
+  document.getElementById('img-zoom-img').src = url;
+  modal.style.display = 'flex';
+}
 </script>
+
+<!-- Image zoom modal -->
+<div id="img-zoom-modal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;display:none;align-items:center;justify-content:center;cursor:zoom-out" onclick="this.style.display='none'">
+  <img id="img-zoom-img" style="max-width:90%;max-height:90%;object-fit:contain;border-radius:4px" onclick="event.stopPropagation()">
+</div>
 </body>
 </html>
