@@ -1642,25 +1642,25 @@ function renderRecDetail() {
     if(hasClone) {
     const sel = selectedSource[idx];
     let useClone, useManual;
-    if(sel === 'clone'){ useClone=true; useManual=false; }
-    else if(sel === 'manual'){ useClone=false; useManual=true; }
+    if(sel === 'manual' && rec){ useClone=false; useManual=true; }
+    else if(sel === 'clone'){ useClone=true; useManual=false; }
     else if(rec && !hasClone){ useManual=true; useClone=false; }
     else { useClone=true; useManual=false; }
     html += `<div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px">`;
     html += `<div onclick="selectSource('clone')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useClone?'border:2px solid #2a9d3f':''}">
-        <span style="font-weight:500">🤖 克隆</span>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-weight:500">🤖 克隆</span>
           <button onclick="event.stopPropagation();playCloneAudio()" style="font-size:12px;padding:4px 10px">▶ 试听</button>
-          <button onclick="event.stopPropagation();regenClone()" style="font-size:12px;padding:4px 8px" title="重新生成">🔄</button>
         </div>
+        <span onclick="event.stopPropagation();regenClone()" style="cursor:pointer;font-size:15px;padding:2px 4px;border-radius:4px" title="重新生成" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='transparent'">🔄</span>
         </div>`;
     html += `<div onclick="selectSource('manual')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useManual?'border:2px solid #2a9d3f':''}">
-        <span style="font-weight:500">🎙 手动</span>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-weight:500">🎙 手动</span>
           <button onclick="event.stopPropagation();playRec()" style="font-size:12px;padding:4px 10px" ${rec?'':'disabled'}>▶ 试听</button>
           <button onclick="event.stopPropagation();toggleRec()" class="primary" id="rec-btn" style="font-size:12px;padding:4px 10px">🎙 录音</button>
-          ${rec?'<button onclick="event.stopPropagation();deleteManual()" style="font-size:12px;padding:4px 8px;color:#d9534f;border-color:#d9534f" title="删除">🗑</button>':''}
         </div>
+        ${rec?'<span onclick="event.stopPropagation();deleteManual()" style="cursor:pointer;font-size:15px;padding:2px 6px;color:#d9534f;border-radius:4px" title="删除" onmouseover="this.style.background=\'#fee\'" onmouseout="this.style.background=\'transparent\'">✕</span>':''}
         </div></div>`;
   } else {
     html += `<div style="display:flex;gap:8px;margin-bottom:8px"><button class="primary" id="rec-btn" onclick="toggleRec()">🎙 开始录音 (空格)</button><button onclick="playRec()" ${rec?'':'disabled'}>▶ 试听</button></div>`;
