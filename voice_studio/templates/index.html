@@ -394,6 +394,36 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
   </div>
 </div>
 
+<!-- Version Compare Modal -->
+<div id="modal-compare" class="modal-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+  <div class="modal" style="width:800px;max-width:90vw">
+    <h3>版本对比</h3>
+    <div style="display:flex;gap:12px;margin-bottom:16px">
+      <div style="flex:1">
+        <label style="font-size:13px;color:#666;margin-bottom:4px;display:block">版本 A</label>
+        <select id="compare-version-a" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px">
+          <option value="original">原始转写</option>
+          <option value="optimized">AI 优化</option>
+          <option value="uploaded">用户上传</option>
+        </select>
+      </div>
+      <div style="flex:1">
+        <label style="font-size:13px;color:#666;margin-bottom:4px;display:block">版本 B</label>
+        <select id="compare-version-b" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px">
+          <option value="original">原始转写</option>
+          <option value="optimized" selected>AI 优化</option>
+          <option value="uploaded">用户上传</option>
+        </select>
+      </div>
+      <button class="primary" onclick="doCompare()" style="align-self:flex-end;padding:8px 16px">对比</button>
+    </div>
+    <div class="preview-area" id="compare-body" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="btn-row">
+      <button onclick="document.getElementById('modal-compare').classList.add('hidden')">关闭</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
 const API = '';
@@ -769,6 +799,7 @@ function renderEditor(body) {
       ${availableVersions.map(v =>
         `<button class="btn-sm" style="background:${v===activeVersion?'#007bff':'#6c757d'}" onclick="switchVersion('${v}')">${versionNames[v]||v}</button>`
       ).join('')}
+      <button class="btn-sm" style="background:#17a2b8;margin-left:8px" onclick="showCompareModal()">📊 版本对比</button>
       <span style="margin-left:auto;font-size:12px;color:#888">当前：${versionNames[activeVersion]||activeVersion}</span>
     </div>`;
   }
@@ -828,14 +859,40 @@ function mergeSelected() {
 }
 async function saveSentences() {
   document.querySelectorAll('.sent-row').forEach((ta,i) => { if(sentences[i]) sentences[i].text = ta.value; });
-  await fetch(API+'/api/project/'+curProj+'/sentences', {
+
+  // Check if there are recordings
+  const hasRecResp = await fetch(API+'/api/project/'+curProj+'/has-recordings');
+  const hasRecData = await hasRecResp.json();
+
+  if(hasRecData.has_recordings) {
+    // Warn user that changed sentences will have their recordings cleared
+    if(!confirm('检测到已有录音。\n\n保存修改后，被修改的句子对应的录音将被清空，需要重新录制。\n\n是否继续保存？')) {
+      return;
+    }
+  }
+
+  const resp = await fetch(API+'/api/project/'+curProj+'/sentences', {
     method:'PUT',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({version: activeVersion, sentences, clear_after: false})
   });
+
+  const result = await resp.json();
+
   // Update local version cache
   sentenceVersions[activeVersion] = sentences;
-  toast('字幕已保存', 'success');
+
+  if(result.changed_indices && result.changed_indices.length > 0) {
+    // Update recordedSet and clonedSet to remove cleared recordings
+    result.changed_indices.forEach(idx => {
+      recordedSet.delete(idx);
+      clonedSet.delete(idx);
+    });
+    toast(`字幕已保存，已清空 ${result.changed_indices.length} 句的录音`, 'success');
+  } else {
+    toast('字幕已保存', 'success');
+  }
+
   await refreshWork();
 }
 async function checkLLM() {
@@ -1161,6 +1218,106 @@ function showPreview(title, oldS, newS) {
   console.log('[showPreview] done');
 }
 function closePreview() { document.getElementById('modal-preview').classList.add('hidden'); pendingResult=null; if(curProj) renderEditor(document.getElementById('work-body')); }
+
+// Version comparison
+function showCompareModal() {
+  const modal = document.getElementById('modal-compare');
+  const selectA = document.getElementById('compare-version-a');
+  const selectB = document.getElementById('compare-version-b');
+
+  // Set default selections
+  selectA.value = 'original';
+  selectB.value = activeVersion === 'original' ? 'optimized' : activeVersion;
+
+  document.getElementById('compare-body').innerHTML = '<p style="text-align:center;color:#888;padding:40px">请选择两个版本并点击"对比"</p>';
+  modal.classList.remove('hidden');
+}
+
+async function doCompare() {
+  const versionA = document.getElementById('compare-version-a').value;
+  const versionB = document.getElementById('compare-version-b').value;
+
+  if(versionA === versionB) {
+    toast('请选择不同的版本进行对比', 'error');
+    return;
+  }
+
+  const dataA = sentenceVersions[versionA];
+  const dataB = sentenceVersions[versionB];
+
+  if(!dataA || !dataB) {
+    toast('所选版本不存在', 'error');
+    return;
+  }
+
+  const versionNames = {original: '原始转写', optimized: 'AI 优化', uploaded: '用户上传'};
+  showCompareResult(versionNames[versionA], dataA, versionNames[versionB], dataB);
+}
+
+function showCompareResult(titleA, dataA, titleB, dataB) {
+  const container = document.getElementById('compare-body');
+  container.innerHTML = `<p style="margin-bottom:12px;color:#888;font-size:13px">${titleA} (${dataA.length} 句) ↔ ${titleB} (${dataB.length} 句)</p>`;
+
+  const fragment = document.createDocumentFragment();
+  const maxLen = Math.max(dataA.length, dataB.length);
+
+  for(let i = 0; i < maxLen; i++) {
+    const sentA = dataA[i];
+    const sentB = dataB[i];
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:1fr 40px 1fr;gap:12px;margin-bottom:16px;align-items:center';
+
+    // Left: version A
+    let leftHtml = '<div>';
+    if(sentA) {
+      const textA = escHtml(sentA.text.substring(0, 100));
+      leftHtml += `<div style="padding:8px 12px;background:#f9f9f9;border-radius:4px;border-left:3px solid #6c757d">
+        <div style="font-size:11px;color:#aaa;margin-bottom:4px">${i+1}.</div>
+        <div style="font-size:13px;color:#333">${textA}</div>
+        <div style="font-size:11px;color:#aaa;margin-top:4px">${fmtS(sentA.start)} → ${fmtS(sentA.end)}</div>
+      </div>`;
+    } else {
+      leftHtml += `<div style="padding:8px 12px;background:#f8f8f8;border-radius:4px;border-left:3px solid #ccc">
+        <div style="font-size:12px;color:#999;text-align:center">—</div>
+      </div>`;
+    }
+    leftHtml += '</div>';
+
+    // Middle: comparison indicator
+    let middleHtml = '<div style="text-align:center;color:#888;font-size:20px">';
+    if(!sentA || !sentB) {
+      middleHtml += '✗';
+    } else if(sentA.text === sentB.text) {
+      middleHtml += '=';
+    } else {
+      middleHtml += '≠';
+    }
+    middleHtml += '</div>';
+
+    // Right: version B
+    let rightHtml = '<div>';
+    if(sentB) {
+      const textB = escHtml(sentB.text.substring(0, 100));
+      const isDifferent = sentA && sentA.text !== sentB.text;
+      rightHtml += `<div style="padding:8px 12px;background:${isDifferent?'#fff3cd':'#f0f9ff'};border-radius:4px;border-left:3px solid ${isDifferent?'#ffc107':'#17a2b8'}">
+        <div style="font-size:11px;color:#aaa;margin-bottom:4px">${i+1}.</div>
+        <div style="font-size:13px;color:#333">${textB}</div>
+        <div style="font-size:11px;color:#aaa;margin-top:4px">${fmtS(sentB.start)} → ${fmtS(sentB.end)}</div>
+      </div>`;
+    } else {
+      rightHtml += `<div style="padding:8px 12px;background:#f8f8f8;border-radius:4px;border-left:3px solid #ccc">
+        <div style="font-size:12px;color:#999;text-align:center">—</div>
+      </div>`;
+    }
+    rightHtml += '</div>';
+
+    row.innerHTML = leftHtml + middleHtml + rightHtml;
+    fragment.appendChild(row);
+  }
+
+  container.appendChild(fragment);
+}
 async function confirmPreview() {
   if(pendingResult && curProj) {
     const version = pendingResult._version || 'optimized'; // default to optimized for AI results

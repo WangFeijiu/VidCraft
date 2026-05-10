@@ -149,18 +149,47 @@ def api_put_sents(name):
     sentences = data.get('sentences', [])
     clear_after = data.get('clear_after', False)
 
-    # Save to appropriate file
+    # Check if we need to clear recordings due to content changes
     filename = f"sentences_{version}.json" if version != 'original' else "sentences.json"
-    (pd(name) / filename).write_text(json.dumps(sentences, ensure_ascii=False, indent=2), "utf-8")
+    filepath = pd(name) / filename
+
+    changed_indices = []
+    if filepath.exists() and not clear_after:
+        # Load old sentences and compare
+        old_sentences = json.loads(filepath.read_text("utf-8"))
+        for i, (old, new) in enumerate(zip(old_sentences, sentences)):
+            if old.get('text') != new.get('text'):
+                changed_indices.append(i)
+        # Check if length changed
+        if len(old_sentences) != len(sentences):
+            # If length changed, clear all recordings after the shorter length
+            min_len = min(len(old_sentences), len(sentences))
+            changed_indices.extend(range(min_len, max(len(old_sentences), len(sentences))))
+
+    # Save to appropriate file
+    filepath.write_text(json.dumps(sentences, ensure_ascii=False, indent=2), "utf-8")
+
+    # Clear affected recordings
+    if changed_indices:
+        rec_dir = pd(name) / "recordings"
+        if rec_dir.exists():
+            for idx in changed_indices:
+                # Remove recordings for changed sentences
+                for pattern in [f"audio_{idx}.*", f"cloned_{idx}.*"]:
+                    for f in rec_dir.glob(pattern):
+                        f.unlink(missing_ok=True)
+                        print(f"[Edit] Cleared recording: {f.name}")
 
     if clear_after:
         rec_dir = pd(name) / "recordings"
         if rec_dir.exists():
             for f in rec_dir.iterdir():
                 f.unlink(missing_ok=True)
+
     if load_state(name).get("stage") == "processing":
         save_state(name, stage="editing", msg="转写完成，请编辑字幕")
-    return jsonify({"ok": True})
+
+    return jsonify({"ok": True, "changed_indices": changed_indices})
 
 @app.route("/api/project/<name>/has-recordings")
 def api_has_recordings(name):
