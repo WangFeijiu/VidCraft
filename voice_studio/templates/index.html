@@ -1640,16 +1640,27 @@ function renderRecDetail() {
   let html = `<div style="margin-bottom:8px;color:#888;font-size:12px">第 ${idx} / ${total} 句</div>`;
   html += `<div class="sent-box" style="font-size:20px;min-height:80px;margin-bottom:16px">${escHtml(sentences[i]?.text||'')}</div>`;
     if(hasClone) {
-    const useManual = rec, useClone = !rec;
+    const sel = selectedSource[idx];
+    let useClone, useManual;
+    if(sel === 'clone'){ useClone=true; useManual=false; }
+    else if(sel === 'manual'){ useClone=false; useManual=true; }
+    else if(rec && !hasClone){ useManual=true; useClone=false; }
+    else { useClone=true; useManual=false; }
     html += `<div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px">`;
-    html += `<div onclick="selectSource('clone')" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useClone?'border:2px solid #2a9d3f':''}"><span style="font-weight:500">🤖 克隆</span>
-        <button onclick="event.stopPropagation();playCloneAudio()" style="font-size:12px;padding:4px 10px">▶ 试听</button>
-        <button onclick="event.stopPropagation();regenClone()" style="font-size:12px;padding:4px 10px">🔄 重新生成</button>
+    html += `<div onclick="selectSource('clone')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useClone?'border:2px solid #2a9d3f':''}">
+        <span style="font-weight:500">🤖 克隆</span>
+        <div style="display:flex;gap:6px">
+          <button onclick="event.stopPropagation();playCloneAudio()" style="font-size:12px;padding:4px 10px">▶ 试听</button>
+          <button onclick="event.stopPropagation();regenClone()" style="font-size:12px;padding:4px 8px" title="重新生成">🔄</button>
+        </div>
         </div>`;
-    html += `<div onclick="selectSource('manual')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useManual?'border:2px solid #2a9d3f':''}"><span style="font-weight:500">🎙 手动</span>
-        <button onclick="event.stopPropagation();playRec()" style="font-size:12px;padding:4px 10px" ${rec?'':'disabled'}>▶ 试听</button>
-        <button onclick="event.stopPropagation();toggleRec()" class="primary" id="rec-btn" style="font-size:12px;padding:4px 10px">🎙 录音</button>
-        ${rec?'<button onclick="event.stopPropagation();deleteManual()" style="font-size:12px;padding:4px 10px;color:#d9534f;border-color:#d9534f">删除</button>':''}
+    html += `<div onclick="selectSource('manual')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useManual?'border:2px solid #2a9d3f':''}">
+        <span style="font-weight:500">🎙 手动</span>
+        <div style="display:flex;gap:6px">
+          <button onclick="event.stopPropagation();playRec()" style="font-size:12px;padding:4px 10px" ${rec?'':'disabled'}>▶ 试听</button>
+          <button onclick="event.stopPropagation();toggleRec()" class="primary" id="rec-btn" style="font-size:12px;padding:4px 10px">🎙 录音</button>
+          ${rec?'<button onclick="event.stopPropagation();deleteManual()" style="font-size:12px;padding:4px 8px;color:#d9534f;border-color:#d9534f" title="删除">🗑</button>':''}
+        </div>
         </div></div>`;
   } else {
     html += `<div style="display:flex;gap:8px;margin-bottom:8px"><button class="primary" id="rec-btn" onclick="toggleRec()">🎙 开始录音 (空格)</button><button onclick="playRec()" ${rec?'':'disabled'}>▶ 试听</button></div>`;
@@ -1673,10 +1684,10 @@ function scrollToActive() {
 let autoPlayPaused = false, rejectedSet = new Set(), selectedSource = {};  // {idx: 'clone'|'manual'}
 function onPlayerEnded() {
   if(autoPlayPaused || curIdx >= sentences.length-1) return;
-  // Mark as accepted in UI only (actual file sync happens at compose time)
   if(clonedSet.has(curIdx+1)) {
     selectedSource[curIdx+1] = 'clone';
-    recordedSet.add(curIdx+1);
+    // Persist to backend immediately so refresh doesn't lose the confirmation
+    fetch(API+'/api/project/'+curProj+'/accept-clone/'+(curIdx+1), {method:'POST'});
     updateRecListItem(curIdx);
     updateRecProgress();
   }

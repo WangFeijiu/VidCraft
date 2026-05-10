@@ -59,6 +59,29 @@ CUSTOM_VOICES_DIR.mkdir(exist_ok=True)
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", ping_timeout=600, ping_interval=120)
 
+# ── Whisper cache for transcribing voice samples ─────────────────────
+_whisper_model = None
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        _whisper_model = WhisperModel("large-v3", device="cuda", compute_type="float16",
+                                      download_root=HF_CACHE)
+    return _whisper_model
+
+def _transcribe_sample(wav_path):
+    """Transcribe a voice sample to use as prompt_text for zero-shot cloning."""
+    try:
+        model = _get_whisper_model()
+        segs_gen, info = model.transcribe(str(wav_path), language="zh",
+                                          beam_size=5, vad_filter=True,
+                                          vad_parameters=dict(min_silence_duration_ms=500))
+        texts = [s.text.strip() for s in segs_gen if s.text.strip()]
+        return " ".join(texts)
+    except Exception:
+        return ""
+
 # ── Helpers ─────────────────────────────────────────────────────────
 def pd(name):           return PROJECTS / name
 def _input_video(name):
@@ -1201,6 +1224,17 @@ def _pipeline_voice_clone(name, prompt_text, voice_id=""):
         voice = next((v for v in VOICE_LIBRARY if v["id"] == voice_id), None)
         is_custom = voice_id.startswith("custom_") and (CUSTOM_VOICES_DIR / voice_id / "sample.wav").exists()
         use_instruct = voice is not None and "CosyVoice" in model_name and "300M" not in model_name
+
+        # For zero-shot mode, auto-transcribe the sample so prompt_text matches the audio content.
+        # This prevents reference-audio content from leaking into synthesized output.
+        if not use_instruct:
+            sample_wav = d / "voice_sample.wav"
+            if sample_wav.exists():
+                transcribed = _transcribe_sample(sample_wav)
+                if transcribed:
+                    prompt_text = transcribed
+                    # Save back to state so resume-clone uses the correct prompt
+                    save_state(name, clone_prompt_text=prompt_text)
 
         if use_instruct:
             # Voice library mode: use inference_instruct2
