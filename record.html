@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>FlowBrain 配音录制</title>
+<style>
+  body { font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+         max-width: 900px; margin: 30px auto; padding: 20px; background: #fafafa; }
+  h2 { color: #333; }
+  .progress { font-size: 16px; color: #666; margin: 10px 0; }
+  .progress .done { color: #2a9d3f; font-weight: bold; }
+  .sentence-box { background: #fff; border: 1px solid #ddd; border-radius: 12px;
+                  padding: 32px; margin: 24px 0; min-height: 120px;
+                  font-size: 30px; line-height: 1.7; box-shadow: 0 2px 6px rgba(0,0,0,.04); }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
+  button { font-size: 16px; padding: 10px 20px; border: 1px solid #ccc;
+           border-radius: 8px; background: #fff; cursor: pointer; }
+  button:hover { background: #f0f0f0; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary { background: #2a9d3f; color: #fff; border-color: #2a9d3f; }
+  button.primary:hover { background: #248a37; }
+  button.danger { background: #d9534f; color: #fff; border-color: #d9534f; }
+  button.recording { background: #d9534f; color: #fff; border-color: #d9534f; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,83,79,.7); }
+                     50% { box-shadow: 0 0 0 12px rgba(217,83,79,0); } }
+  .nav { display: flex; gap: 10px; align-items: center; margin: 12px 0; }
+  .nav input { width: 70px; padding: 8px; font-size: 16px; border: 1px solid #ccc; border-radius: 6px; }
+  .status { color: #888; margin: 10px 0; font-size: 14px; }
+  .status.ok { color: #2a9d3f; }
+  audio { width: 100%; margin: 10px 0; }
+  .hint { color: #888; font-size: 13px; margin-top: 20px; line-height: 1.6; }
+  kbd { background: #eee; border: 1px solid #ccc; border-radius: 4px;
+        padding: 2px 6px; font-family: monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<h2>🎙 FlowBrain 配音录制</h2>
+<div class="progress" id="progress">加载中...</div>
+<div class="nav">
+  <button onclick="prev()">← 上一句</button>
+  <input type="number" id="goto-idx" min="1" onkeydown="if(event.key==='Enter')goto()">
+  <button onclick="goto()">跳转</button>
+  <button onclick="next()">下一句 →</button>
+  <button onclick="nextUnrecorded()">↗ 下一未录</button>
+</div>
+<div class="sentence-box" id="sentence">—</div>
+<div class="controls">
+  <button id="record-btn" class="primary" onclick="toggleRecord()">🎙 开始录音 (空格)</button>
+  <button id="play-btn" onclick="playRecorded()" disabled>▶ 试听</button>
+  <button onclick="next()">✓ 提交并下一句 (回车)</button>
+</div>
+<audio id="player" controls style="display:none;"></audio>
+<div class="status" id="status">—</div>
+<div class="hint">
+  <p>快捷键: <kbd>空格</kbd> 开始/停止录音 · <kbd>回车</kbd> 下一句 · <kbd>←</kbd>/<kbd>→</kbd> 上一句/下一句</p>
+  <p>录音停止后自动上传保存。可以来回跳转、重录任意一句。</p>
+</div>
+
+<script>
+let sentences = [];
+let currentIdx = 0;            // 0-based
+let mediaRecorder = null;
+let chunks = [];
+let isRecording = false;
+let recordedSet = new Set();   // 1-based indices
+
+async function init() {
+  try {
+    sentences = await (await fetch('/sentences')).json();
+    const list = await (await fetch('/list')).json();
+    list.forEach(name => {
+      const m = name.match(/sentence_(\d+)\.webm/);
+      if (m) recordedSet.add(parseInt(m[1]));
+    });
+    for (let i = 1; i <= sentences.length; i++) {
+      if (!recordedSet.has(i)) { currentIdx = i - 1; break; }
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    mediaRecorder.onstop = onStop;
+  } catch (e) {
+    document.getElementById('status').textContent = '初始化失败: ' + e.message;
+    return;
+  }
+  render();
+}
+
+function render() {
+  const idx = currentIdx + 1;
+  const total = sentences.length;
+  const done = recordedSet.size;
+  document.getElementById('progress').innerHTML =
+    `第 <b>${idx}</b> / ${total} 句 · 已录 <span class="done">${done}</span>`;
+  document.getElementById('sentence').textContent = sentences[currentIdx] || '';
+  document.getElementById('goto-idx').value = idx;
+  const rec = recordedSet.has(idx);
+  document.getElementById('play-btn').disabled = !rec;
+  const s = document.getElementById('status');
+  if (rec) { s.textContent = '✓ 已录制 (可重录覆盖)'; s.className = 'status ok'; }
+  else { s.textContent = '未录制'; s.className = 'status'; }
+  document.getElementById('player').style.display = 'none';
+}
+
+async function toggleRecord() {
+  if (!mediaRecorder) return;
+  if (!isRecording) {
+    chunks = [];
+    mediaRecorder.start();
+    isRecording = true;
+    const b = document.getElementById('record-btn');
+    b.textContent = '⏹ 停止 (空格)';
+    b.classList.add('recording');
+    b.classList.remove('primary');
+  } else {
+    mediaRecorder.stop();
+    isRecording = false;
+    const b = document.getElementById('record-btn');
+    b.textContent = '🎙 开始录音 (空格)';
+    b.classList.remove('recording');
+    b.classList.add('primary');
+  }
+}
+
+async function onStop() {
+  const blob = new Blob(chunks, { type: 'audio/webm' });
+  const fd = new FormData();
+  fd.append('audio', blob, `sentence_${(currentIdx+1).toString().padStart(3,'0')}.webm`);
+  const idxAtSend = currentIdx + 1;
+  const r = await fetch(`/upload/${idxAtSend}`, { method: 'POST', body: fd });
+  if (r.ok) {
+    recordedSet.add(idxAtSend);
+    render();
+    const player = document.getElementById('player');
+    player.src = URL.createObjectURL(blob);
+    player.style.display = 'block';
+  } else {
+    document.getElementById('status').textContent = '上传失败: ' + r.status;
+  }
+}
+
+function playRecorded() {
+  const audio = document.getElementById('player');
+  audio.src = `/audio/${currentIdx+1}?t=${Date.now()}`;
+  audio.style.display = 'block';
+  audio.play();
+}
+
+function next() {
+  if (currentIdx < sentences.length - 1) { currentIdx++; render(); }
+}
+function prev() {
+  if (currentIdx > 0) { currentIdx--; render(); }
+}
+function goto() {
+  const idx = parseInt(document.getElementById('goto-idx').value);
+  if (idx >= 1 && idx <= sentences.length) { currentIdx = idx - 1; render(); }
+}
+function nextUnrecorded() {
+  for (let i = currentIdx + 1; i < sentences.length; i++) {
+    if (!recordedSet.has(i + 1)) { currentIdx = i; render(); return; }
+  }
+  document.getElementById('status').textContent = '后面已全部录完';
+}
+
+// keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); toggleRecord(); }
+  else if (e.code === 'Enter') { e.preventDefault(); next(); }
+  else if (e.code === 'ArrowLeft') { e.preventDefault(); prev(); }
+  else if (e.code === 'ArrowRight') { e.preventDefault(); next(); }
+});
+
+init();
+</script>
+</body>
+</html>

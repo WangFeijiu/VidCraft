@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Cache
+.cache/
+*.pyc
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Audio files
+*.wav
+*.mp3
+*.flac
+
+# Large model files
+*.pth
+*.bin
+*.onnx
+*.safetensors
+
+# Temporary files
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific
+recordings/
+CosyVoice/pretrained_models/
+voice_studio/
