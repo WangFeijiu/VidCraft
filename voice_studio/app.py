@@ -483,10 +483,163 @@ def api_regen_clone(name, idx):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/project/<name>/compose", methods=["POST"])
 def api_compose(name):
     save_state(name, stage="composing", msg="拼接音频...")
     threading.Thread(target=_pipeline_compose, args=(name,), daemon=True).start()
     return jsonify({"ok": True})
+
+# ── Subtitle style (preview & customization) ─────────────────────────
+DEFAULT_SUBTITLE_STYLE = {
+    "font_name": "Microsoft YaHei",
+    "font_size": 20,
+    "primary_color": "#FFFFFF",
+    "outline_color": "#000000",
+    "outline": 1,
+    "position": "bottom",  # 'top' | 'middle' | 'bottom'
+    "margin_v": 30,
+}
+
+def _hex_to_ass_color(hex_color):
+    """Convert #RRGGBB to ASS &H00BBGGRR& format."""
+    h = (hex_color or "#FFFFFF").lstrip("#")
+    if len(h) != 6:
+        h = "FFFFFF"
+    r, g, b = h[0:2], h[2:4], h[4:6]
+    return f"&H00{b.upper()}{g.upper()}{r.upper()}&"
+
+def _force_style_from(style):
+    s = {**DEFAULT_SUBTITLE_STYLE, **(style or {})}
+    pos = s.get("position", "bottom")
+    alignment = {"bottom": 2, "middle": 5, "top": 8}.get(pos, 2)
+    return (
+        f"FontName={s['font_name']},FontSize={s['font_size']},"
+        f"PrimaryColour={_hex_to_ass_color(s['primary_color'])},"
+        f"OutlineColour={_hex_to_ass_color(s['outline_color'])},"
+        f"Outline={s['outline']},Shadow=0,Alignment={alignment},MarginV={s['margin_v']}"
+    )
+
+@app.route("/api/project/<name>/subtitle-style", methods=["GET", "POST"])
+def api_subtitle_style(name):
+    state = load_state(name)
+    if request.method == "POST":
+        incoming = request.json or {}
+        cur = state.get("subtitle_style", {}) or {}
+        cur.update({k: v for k, v in incoming.items() if k in DEFAULT_SUBTITLE_STYLE})
+        save_state(name, subtitle_style=cur)
+        return jsonify({"ok": True, "subtitle_style": {**DEFAULT_SUBTITLE_STYLE, **cur}})
+    return jsonify({**DEFAULT_SUBTITLE_STYLE, **(state.get("subtitle_style") or {})})
+
+@app.route("/api/project/<name>/preview-frame")
+def api_preview_frame(name):
+    """Return a JPEG frame from the original video at the first non-deleted sentence start."""
+    d = pd(name)
+    inp = _input_video(name)
+    if not inp.exists():
+        return ("", 404)
+    sents_path = _active_sentences_path(name)
+    if not sents_path.exists():
+        return ("", 404)
+    sents = json.loads(sents_path.read_text("utf-8"))
+    state = load_state(name)
+    deleted = set(state.get("deleted_sentences", []))
+    t = 0.0
+    for i, s in enumerate(sents, 1):
+        if i in deleted:
+            continue
+        t = float(s.get("start", 0)) + 0.05
+        break
+    out = d / "_preview_frame.jpg"
+    try:
+        subprocess.run([FFMPEG, "-y", "-ss", f"{t:.3f}", "-i", str(inp),
+                        "-frames:v", "1", "-q:v", "3", str(out)],
+                       check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        return ("", 500)
+    return send_file(str(out), mimetype="image/jpeg")
+
+@app.route("/api/project/<name>/deleted-sentences")
+def api_deleted_sentences(name):
+    state = load_state(name)
+    return jsonify(state.get("deleted_sentences", []))
+
+@app.route("/api/project/<name>/delete-sentence/<int:idx>", methods=["POST"])
+def api_delete_sentence(name, idx):
+    state = load_state(name)
+    deleted = set(state.get("deleted_sentences", []))
+    deleted.add(idx)
+    save_state(name, deleted_sentences=sorted(deleted))
+    return jsonify({"ok": True})
+
+@app.route("/api/project/<name>/restore-sentence/<int:idx>", methods=["POST"])
+def api_restore_sentence(name, idx):
+    state = load_state(name)
+    deleted = set(state.get("deleted_sentences", []))
+    deleted.discard(idx)
+    save_state(name, deleted_sentences=sorted(deleted))
+    return jsonify({"ok": True})
+
+@app.route("/api/project/<name>/sentence-clip/<int:idx>")
+def api_sentence_clip(name, idx):
+    """Stream the original-video segment for sentence idx (1-based)."""
+    d = pd(name)
+    sents_path = _active_sentences_path(name)
+    if not sents_path.exists():
+        return ("", 404)
+    sents = json.loads(sents_path.read_text("utf-8"))
+    i = idx - 1
+    if i < 0 or i >= len(sents):
+        return ("", 404)
+    s = sents[i]
+    start, end = float(s.get("start", 0)), float(s.get("end", 0))
+    if end <= start:
+        return ("", 404)
+    inp = _input_video(name)
+    if not inp.exists():
+        return ("", 404)
+    clips_dir = d / "clips"
+    clips_dir.mkdir(exist_ok=True)
+    out = clips_dir / f"s_{idx:03d}.mp4"
+    # Re-cut if missing or older than the source video or sentences file
+    if not out.exists() or out.stat().st_size < 1024 or out.stat().st_mtime < max(inp.stat().st_mtime, sents_path.stat().st_mtime):
+        dur = max(0.05, end - start)
+        # Hybrid seek for accuracy + speed:
+        #   -ss <start-2s> BEFORE -i = fast input seek to nearest keyframe before target
+        #   -ss <2s> AFTER -i = accurate decode-forward seek to exact frame
+        # This avoids the "black frame" problem of pure input seek when the
+        # target falls between keyframes.
+        pre = max(0.0, start - 2.0)
+        post = start - pre
+        # If we couldn't back up by 2s (very early sentence), drop input-seek entirely
+        # so ffmpeg decodes from the beginning — slower but always correct.
+        cmd = [FFMPEG, "-y"]
+        if pre > 0.05:
+            cmd += ["-ss", f"{pre:.3f}", "-i", str(inp), "-ss", f"{post:.3f}"]
+        else:
+            cmd += ["-i", str(inp), "-ss", f"{start:.3f}"]
+        cmd += [
+            "-t", f"{dur:.3f}",
+            "-map", "0:v:0", "-map", "0:a:0?",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            "-avoid_negative_ts", "make_zero",
+            str(out)
+        ]
+        try:
+            r = subprocess.run(cmd, check=True, capture_output=True)
+            # If output is still tiny, the encode silently produced nothing useful — purge it
+            if out.exists() and out.stat().st_size < 1024:
+                out.unlink(missing_ok=True)
+                print(f"[sentence-clip] output too small for {name} idx={idx}; "
+                      + r.stderr.decode('utf-8', errors='ignore')[-500:])
+                return ("", 500)
+        except subprocess.CalledProcessError as e:
+            print(f"[sentence-clip] ffmpeg failed for {name} idx={idx}: "
+                  + (e.stderr or b'').decode('utf-8', errors='ignore')[-500:])
+            return ("", 500)
+    return send_file(str(out), mimetype="video/mp4", conditional=True)
 
 @app.route("/api/project/<name>/download")
 def api_download(name):
@@ -1158,52 +1311,108 @@ def _pipeline_compose(name):
     try:
         import numpy as np, soundfile as sf
         sentences = json.loads(_active_sentences_path(name).read_text("utf-8"))
-        dur = load_state(name).get("duration", 600)
+        state = load_state(name)
+        deleted = set(state.get("deleted_sentences", []))
         SR = 24000
-        total = int(dur * SR)
-        out = np.zeros(total, dtype=np.float32)
 
-        for i, seg in enumerate(sentences, 1):
+        active = [(i, seg) for i, seg in enumerate(sentences, 1) if i not in deleted]
+        if not active:
+            save_state(name, stage="error", msg="没有可合成的内容（所有句子已被删除）")
+            return
+
+        save_state(name, stage="composing", msg="提取片段...")
+        tmp_dir = d / "_compose_segments"
+        tmp_dir.mkdir(exist_ok=True)
+
+        segment_files = []
+        srt_entries = []
+        time_offset = 0.0
+
+        for seg_idx, (i, seg) in enumerate(active):
+            seg_start, seg_end = seg["start"], seg["end"]
+            seg_dur = seg_end - seg_start
+            seg_video = tmp_dir / f"seg_{seg_idx:04d}.mp4"
+
             rec = d / "recordings" / f"s_{i:03d}.webm"
-            # Fallback to clone if no manual recording
             if not rec.exists():
                 rec = d / "recordings" / f"s_{i:03d}_clone.webm"
-            if not rec.exists(): continue
-            wav_tmp = d / f"_t{i}.wav"
-            subprocess.run([FFMPEG, "-y", "-i", str(rec), "-ar", str(SR),
-                            "-ac", "1", "-c:a", "pcm_s16le", str(wav_tmp)],
-                           check=True, capture_output=True)
-            audio, _ = sf.read(str(wav_tmp)); wav_tmp.unlink(missing_ok=True)
-            if audio.ndim > 1: audio = audio.mean(axis=1)
-            audio = audio.astype(np.float32)
-            si = int(seg["start"] * SR)
-            ei = min(si + len(audio), total)
-            if si < total:
-                out[si:ei] = audio[:ei - si]
 
-        mx = float(np.max(np.abs(out)))
-        if mx > 0: out = out / mx * 0.95
-        sf.write(str(d / "final_audio.wav"), out, SR)
+            if rec.exists():
+                # Convert recording to normalized WAV
+                wav_tmp = tmp_dir / f"rec_{seg_idx}.wav"
+                subprocess.run([FFMPEG, "-y", "-i", str(rec), "-ar", str(SR),
+                                "-ac", "1", "-c:a", "pcm_s16le", str(wav_tmp)],
+                               check=True, capture_output=True)
+                audio, _ = sf.read(str(wav_tmp))
+                wav_tmp.unlink(missing_ok=True)
+                if audio.ndim > 1: audio = audio.mean(axis=1)
+                mx = float(np.max(np.abs(audio)))
+                if mx > 0: audio = (audio / mx * 0.95).astype(np.float32)
+                rec_wav = tmp_dir / f"rec_{seg_idx}_norm.wav"
+                sf.write(str(rec_wav), audio, SR)
 
-        save_state(name, stage="composing", msg="生成字幕...")
+                # Extract video segment + overlay recording audio
+                subprocess.run([
+                    FFMPEG, "-y",
+                    "-ss", str(seg_start), "-to", str(seg_end), "-i", str(inp),
+                    "-i", str(rec_wav),
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                    "-c:a", "aac", "-b:a", "192k", "-shortest",
+                    str(seg_video)
+                ], check=True, capture_output=True)
+                rec_wav.unlink(missing_ok=True)
+            else:
+                # No recording: extract segment with original audio
+                subprocess.run([
+                    FFMPEG, "-y",
+                    "-ss", str(seg_start), "-to", str(seg_end), "-i", str(inp),
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                    "-c:a", "aac", "-b:a", "192k",
+                    str(seg_video)
+                ], check=True, capture_output=True)
+
+            segment_files.append(seg_video)
+            srt_entries.append({"idx": seg_idx + 1, "start": time_offset,
+                                "end": time_offset + seg_dur, "text": seg["text"]})
+            time_offset += seg_dur
+            save_state(name, stage="composing", msg=f"提取片段 {seg_idx + 1}/{len(active)}...")
+
+        # Concatenate segments
+        save_state(name, stage="composing", msg="拼接视频...")
+        concat_list = tmp_dir / "concat.txt"
+        with open(str(concat_list), "w", encoding="utf-8") as f:
+            for seg_file in segment_files:
+                f.write(f"file '{seg_file.name}'\n")
+
+        concat_video = tmp_dir / "concat.mp4"
+        subprocess.run([
+            FFMPEG, "-y", "-f", "concat", "-safe", "0",
+            "-i", str(concat_list), "-c", "copy", str(concat_video)
+        ], check=True, capture_output=True)
+
+        # Generate compressed timeline SRT
         srt = d / "final.srt"
         with open(str(srt), "w", encoding="utf-8") as f:
-            for i, seg in enumerate(sentences, 1):
-                f.write(f"{i}\n{ts(seg['start'])} --> {ts(seg['end'])}\n{seg['text']}\n\n")
+            for entry in srt_entries:
+                f.write(f"{entry['idx']}\n{ts(entry['start'])} --> {ts(entry['end'])}\n{entry['text']}\n\n")
 
+        # Burn subtitles
         save_state(name, stage="composing", msg="合成视频（编码中）...")
         srt_p = str(srt).replace("\\", "/").replace(":", "\\:")
+        force_style = _force_style_from(state.get("subtitle_style"))
         subprocess.run([
             FFMPEG, "-y",
-            "-i", str(inp), "-i", str(d / "final_audio.wav"),
-            "-vf", (f"subtitles='{srt_p}':force_style='FontName=Microsoft YaHei,"
-                    "FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-                    "Outline=1,Shadow=0,Alignment=2,MarginV=30'"),
-            "-map", "0:v:0", "-map", "1:a:0",
+            "-i", str(concat_video),
+            "-vf", f"subtitles='{srt_p}':force_style='{force_style}'",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
             str(d / "final.mp4")
         ], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+
+        # Cleanup
+        import shutil
+        shutil.rmtree(str(tmp_dir), ignore_errors=True)
 
         save_state(name, stage="done", msg="完成！点击下载")
     except Exception as e:
@@ -1866,6 +2075,37 @@ def api_i2v_image(name, fname):
     mt = "image/jpeg" if fname.endswith(".jpg") else "image/png"
     return send_file(str(p), mimetype=mt)
 
+@app.route("/api/img2vid/<name>/theme", methods=["POST"])
+def api_i2v_set_theme(name):
+    d = i2v_path(name)
+    if not d.exists():
+        return jsonify({"error": "项目不存在"}), 404
+    theme = (request.json or {}).get("theme", "")
+    i2v_save(name, theme=theme)
+    return jsonify({"ok": True})
+
+@app.route("/api/img2vid/<name>/add-images", methods=["POST"])
+def api_i2v_add_images(name):
+    d = i2v_path(name)
+    if not d.exists():
+        return jsonify({"error": "项目不存在"}), 404
+    images_dir = d / "images"
+    images_dir.mkdir(exist_ok=True)
+    existing = sorted(images_dir.glob("img_*"))
+    next_idx = (int(existing[-1].stem.split("_")[-1]) + 1) if existing else 0
+    added = 0
+    for key in sorted(request.files):
+        f = request.files[key]
+        if not f or not f.filename: continue
+        ext = Path(f.filename).suffix.lower() or ".jpg"
+        f.save(str(images_dir / f"img_{next_idx:03d}{ext}"))
+        next_idx += 1; added += 1
+    if added == 0:
+        return jsonify({"error": "未上传任何图片"}), 400
+    total = len(list(images_dir.glob("img_*")))
+    i2v_save(name, stage="uploading", image_count=total, msg=f"已添加 {added} 张图片")
+    return jsonify({"ok": True, "added": added, "total": total})
+
 @app.route("/api/img2vid/<name>/reorder", methods=["POST"])
 def api_i2v_reorder(name):
     order = request.json.get("order", [])
@@ -1935,7 +2175,43 @@ def api_i2v_download(name):
 @app.route("/api/img2vid/<name>", methods=["DELETE"])
 def api_i2v_delete(name):
     d = i2v_path(name)
-    if d.exists(): shutil.rmtree(d)
+    if d.exists():
+        # On Windows files may be locked briefly; try a few times then fall back
+        for _ in range(3):
+            try:
+                shutil.rmtree(d)
+                break
+            except (PermissionError, OSError):
+                import time; time.sleep(0.3)
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+    return jsonify({"ok": True})
+
+@app.route("/api/img2vid/<name>/reset", methods=["POST"])
+def api_i2v_reset(name):
+    """Clear all project data but keep the project shell."""
+    d = i2v_path(name)
+    if not d.exists():
+        return jsonify({"error": "项目不存在"}), 404
+    theme = i2v_state(name).get("theme", "")
+    # Delete everything except state.json
+    for f in list(d.iterdir()):
+        if f.name == "state.json":
+            continue
+        try:
+            if f.is_dir():
+                shutil.rmtree(f, ignore_errors=True)
+            else:
+                f.unlink(missing_ok=True)
+        except Exception:
+            pass
+    (d / "images").mkdir(exist_ok=True)
+    (d / "recordings").mkdir(exist_ok=True)
+    # Reset state to fresh upload stage
+    (d / "state.json").write_text(json.dumps({
+        "stage": "uploading", "theme": theme, "image_count": 0,
+        "msg": "数据已清空，请重新上传图片"
+    }, ensure_ascii=False), "utf-8")
     return jsonify({"ok": True})
 
 # ── Image-to-Video pipelines ───────────────────────────────────────
@@ -1992,6 +2268,35 @@ def _pipeline_i2v_generate(name):
         # Check for user voiceprint
         voice_sample = d / "voice_sample.wav"
         has_voiceprint = voice_sample.exists()
+        if has_voiceprint:
+            # Validate file is a real WAV — earlier versions saved raw webm under this name.
+            # Check both the RIFF/WAVE magic bytes AND that soundfile can read it.
+            is_valid = False
+            try:
+                with open(voice_sample, "rb") as _vfh:
+                    head = _vfh.read(12)
+                if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+                    import soundfile as _sf_check
+                    _sf_check.info(str(voice_sample))
+                    is_valid = True
+            except Exception:
+                is_valid = False
+            if not is_valid:
+                # Try ffmpeg re-encode — original may be webm-with-wav-name or other format
+                try:
+                    backup = d / "_voice_sample_raw.bin"
+                    if backup.exists(): backup.unlink()
+                    voice_sample.rename(backup)
+                    subprocess.run([FFMPEG, "-y", "-i", str(backup),
+                                    "-ar", "24000", "-ac", "1", "-f", "wav",
+                                    str(voice_sample)],
+                                   check=True, capture_output=True)
+                    backup.unlink(missing_ok=True)
+                    import soundfile as _sf_check2
+                    _sf_check2.info(str(voice_sample))  # re-validate
+                except Exception:
+                    voice_sample.unlink(missing_ok=True)
+                    has_voiceprint = False
         if not has_voiceprint:
             voice_sample = COSYVOICE_DIR / "asset" / "zero_shot_prompt.wav"
 

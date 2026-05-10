@@ -222,7 +222,10 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
   <div id="v-i2v-work" class="hidden">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <h2 id="i2v-title" style="margin-bottom:0"></h2>
-      <button onclick="deleteCurI2V()" style="font-size:13px;padding:6px 14px;background:#d9534f;color:#fff;border:none;border-radius:6px;cursor:pointer">删除项目</button>
+      <div style="display:flex;gap:8px">
+        <button onclick="resetCurI2V()" style="font-size:13px;padding:6px 14px;background:#f0ad4e;color:#fff;border:none;border-radius:6px;cursor:pointer">清除数据</button>
+        <button onclick="deleteCurI2V()" style="font-size:13px;padding:6px 14px;background:#d9534f;color:#fff;border:none;border-radius:6px;cursor:pointer">删除项目</button>
+      </div>
     </div>
     <div class="stage-bar" id="i2v-stages"></div>
     <div id="i2v-body"></div>
@@ -620,7 +623,7 @@ function showConfirm(title, message, okText, cancelText) {
     modal.className = 'modal-overlay';
     modal.innerHTML = `<div class="modal" style="max-width:420px">
       <h3>${escHtml(title)}</h3>
-      ${message ? `<p style="margin:16px 0;line-height:1.6;color:#666">${escHtml(message)}</p>` : ''}
+      ${message ? `<p style="margin:16px 0;line-height:1.6;color:#666;white-space:pre-wrap">${escHtml(message)}</p>` : ''}
       <div class="btn-row">
         <button onclick="this.closest('.modal-overlay').remove();window._confirmResolve(false)">${escHtml(cancelText||'取消')}</button>
         <button class="primary" onclick="this.closest('.modal-overlay').remove();window._confirmResolve(true)">${escHtml(okText||'确定')}</button>
@@ -796,6 +799,8 @@ async function refreshWork() {
     clonedSet = new Set(cln);
     const sel = await (await fetch(API+'/api/project/'+curProj+'/selected-sources')).json();
     selectedSource = sel || {};
+    const del = await (await fetch(API+'/api/project/'+curProj+'/deleted-sentences')).json();
+    deletedSet = new Set(del);
     renderRecorder(body);
   } else if(st.stage === 'composing') {
     body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎬</div><p style="margin-top:12px">${st.msg||'生成中...'}</p></div>`;
@@ -1672,12 +1677,15 @@ function renderRecorder(body) {
 function renderManualRec() {
   const idx=curIdx, total=sentences.length;
   const done = Object.keys(selectedSource).filter(k => parseInt(k) <= total).length;
-  let html = `<div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center"><span id="rec-progress-bar">已确认 <span style="color:#2a9d3f;font-weight:500">${done}</span> / ${total} 句</span><div style="display:flex;gap:8px"><button onclick="startAutoPlay()" style="font-size:12px;padding:6px 12px">▶ 自动播放</button><button onclick="stopAutoPlay()" style="font-size:12px;padding:6px 12px">⏸ 暂停</button><button class="primary" onclick="startCompose()" ${done<total?'disabled':''}>🎬 生成视频</button></div></div>`;
+  let html = `<div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center"><span id="rec-progress-bar">已确认 <span style="color:#2a9d3f;font-weight:500">${done}</span> / ${total - deletedSet.size} 句${deletedSet.size?`（已删除 <span style="color:#d9534f">${deletedSet.size}</span> 句）`:''}</span><div style="display:flex;gap:8px"><button onclick="startAutoPlay()" style="font-size:12px;padding:6px 12px">▶ 自动播放</button><button onclick="stopAutoPlay()" style="font-size:12px;padding:6px 12px">⏸ 暂停</button><button class="primary" onclick="goToSubtitlePreview()" ${done < (total - deletedSet.size)?'disabled':''}>🎬 生成视频</button></div></div>`;
   html += `<div class="rec-layout"><div class="rec-list" id="rec-list">`;
   for(let i=0;i<total;i++) {
     const confirmed = selectedSource[i+1];
+    const isDeleted = deletedSet.has(i+1);
     const badge = confirmed ? '<span class="rec-badge manual">✓</span>' : '';
-    html += `<div class="rec-item ${i===idx?'active':''}" onclick="selectRecItem(${i})"><span class="rec-idx">${i+1}</span><span class="rec-text">${escHtml(sentences[i]?.text||'')}</span>${badge}</div>`;
+    const delMark = isDeleted ? '<span class="rec-del-mark" style="color:#d9534f;margin-left:4px">✕</span>' : '';
+    const opacity = isDeleted ? 'opacity:0.5' : '';
+    html += `<div class="rec-item ${i===idx?'active':''}" onclick="selectRecItem(${i})" style="${opacity}"><span class="rec-idx">${i+1}</span><span class="rec-text">${escHtml(sentences[i]?.text||'')}</span>${badge}${delMark}</div>`;
   }
   html += `</div><div class="rec-detail" id="rec-detail">${renderRecDetail()}</div></div>`;
   return html;
@@ -1687,38 +1695,62 @@ function renderRecDetail() {
   if(i<0||i>=total) return '<p style="color:#888">请选择一句字幕</p>';
   const rec=recordedSet.has(idx), hasClone=clonedSet.has(idx);
   const sel = selectedSource[idx];
+  const isDeleted = deletedSet.has(idx);
   let html = `<div style="margin-bottom:8px;color:#888;font-size:12px;display:flex;justify-content:space-between;align-items:center">
-      <span>第 ${idx} / ${total} 句</span>
-      ${sel ? '<span onclick="event.stopPropagation();clearSelection('+idx+')" style="cursor:pointer;font-size:12px;color:#888;padding:2px 8px;border-radius:4px" title="取消选择" onmouseover="this.style.background=\'#eee\'" onmouseout="this.style.background=\'transparent\'">✕ 重置</span>' : ''}
+      <span>第 ${idx} / ${total} 句${isDeleted?' <span style="color:#d9534f;font-weight:500">（已删除）</span>':''}</span>
+      <span style="display:flex;gap:8px;align-items:center">
+        ${sel ? '<span onclick="event.stopPropagation();clearSelection('+idx+')" style="cursor:pointer;font-size:12px;color:#888;padding:2px 8px;border-radius:4px" title="取消选择" onmouseover="this.style.background=\'#eee\'" onmouseout="this.style.background=\'transparent\'">✕ 重置</span>' : ''}
+        ${isDeleted
+          ? '<span onclick="event.stopPropagation();restoreSentence('+idx+')" style="cursor:pointer;font-size:12px;color:#2a9d3f;padding:2px 8px;border-radius:4px" title="恢复此句">↺ 恢复</span>'
+          : '<span onclick="event.stopPropagation();deleteSentence('+idx+')" style="cursor:pointer;font-size:12px;color:#d9534f;padding:2px 8px;border-radius:4px" title="删除此句（生成时跳过）" onmouseover="this.style.background=\'#fee\'" onmouseout="this.style.background=\'transparent\'">🗑 删除此句</span>'}
+      </span>
     </div>`;
-  html += `<div class="sent-box" style="font-size:20px;min-height:80px;margin-bottom:16px">${escHtml(sentences[i]?.text||'')}</div>`;
-    if(hasClone) {
-    let useClone, useManual;
-    if(sel === 'manual' && rec){ useClone=false; useManual=true; }
-    else if(sel === 'clone'){ useClone=true; useManual=false; }
-    else if(rec && !hasClone){ useManual=true; useClone=false; }
-    else { useClone=false; useManual=false; }  // 未选择过 → 谁都不选中
-    html += `<div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px">`;
-    html += `<div onclick="selectSource('clone')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useClone?'border:2px solid #2a9d3f':''}">
-        <div style="display:flex;align-items:center;gap:12px">
-          <span style="font-weight:500">🤖 克隆</span>
-          <button onclick="event.stopPropagation();playCloneAudio()" style="font-size:12px;padding:4px 10px">▶ 试听</button>
-        </div>
-        <span onclick="event.stopPropagation();regenClone()" style="cursor:pointer;font-size:15px;padding:2px 4px;border-radius:4px" title="重新生成" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='transparent'">🔄</span>
-        </div>`;
-    html += `<div onclick="selectSource('manual')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useManual?'border:2px solid #2a9d3f':''}">
-        <div style="display:flex;align-items:center;gap:12px">
-          <span style="font-weight:500">🎙 手动</span>
-          <button onclick="event.stopPropagation();playRec()" style="font-size:12px;padding:4px 10px" ${rec?'':'disabled'}>▶ 试听</button>
-          <button onclick="event.stopPropagation();toggleRec()" class="primary" id="rec-btn" style="font-size:12px;padding:4px 10px">🎙 录音</button>
-        </div>
-        ${rec?'<span onclick="event.stopPropagation();deleteManual()" style="cursor:pointer;font-size:15px;padding:2px 6px;color:#d9534f;border-radius:4px" title="删除" onmouseover="this.style.background=\'#fee\'" onmouseout="this.style.background=\'transparent\'">✕</span>':''}
-        </div></div>`;
-  } else {
-    html += `<div style="display:flex;gap:8px;margin-bottom:8px"><button class="primary" id="rec-btn" onclick="toggleRec()">🎙 开始录音 (空格)</button><button onclick="playRec()" ${rec?'':'disabled'}>▶ 试听</button></div>`;
-    html += `<div class="status ${rec?'ok':''}">${rec?'✓ 已录制':'未录制'}</div>`;
-  }
+  html += `<div class="sent-box" style="font-size:20px;min-height:80px;margin-bottom:16px;${isDeleted?'opacity:0.5;text-decoration:line-through;':''}">${escHtml(sentences[i]?.text||'')}</div>`;
+  // Always show both 克隆 / 手动 rows so the user can see both options at a glance.
+  // Clone row is interactive only when a clone exists; manual row is interactive only when a recording exists.
+  const useClone = (sel === 'clone') && hasClone;
+  const useManual = (sel === 'manual') && rec;
+  html += `<div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px">`;
+  // ── Clone row ──
+  const cloneClick = hasClone ? `selectSource('clone')` : `toast('请先在「音色克隆」步骤生成克隆音频','warn')`;
+  const cloneStyle = hasClone
+    ? `cursor:pointer;${useClone?'border:2px solid #2a9d3f':'border:2px solid transparent'}`
+    : `cursor:not-allowed;opacity:0.55;border:2px solid transparent`;
+  html += `<div onclick="${cloneClick}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:6px 8px;background:#fff;border-radius:6px;${cloneStyle}">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-weight:500">🤖 克隆</span>
+        ${hasClone
+          ? '<button onclick="event.stopPropagation();playCloneAudio()" style="font-size:12px;padding:4px 10px">▶ 试听</button>'
+          : '<span style="font-size:12px;color:#aaa">未生成</span>'}
+      </div>
+      ${hasClone
+        ? '<span onclick="event.stopPropagation();regenClone()" style="cursor:pointer;font-size:15px;padding:2px 4px;border-radius:4px" title="重新生成" onmouseover="this.style.background=\'#f0f0f0\'" onmouseout="this.style.background=\'transparent\'">🔄</span>'
+        : ''}
+      </div>`;
+  // ── Manual row ──
+  const manualClick = rec ? `selectSource('manual')` : `toast('请先录制手动音频','warn')`;
+  const manualStyle = rec
+    ? `cursor:pointer;${useManual?'border:2px solid #2a9d3f':'border:2px solid transparent'}`
+    : `cursor:default;border:2px solid transparent`;
+  html += `<div onclick="${manualClick}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;background:#fff;border-radius:6px;${manualStyle}">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-weight:500;${rec?'':'color:#aaa'}">🎙 手动</span>
+        <button onclick="event.stopPropagation();playRec()" style="font-size:12px;padding:4px 10px" ${rec?'':'disabled'}>▶ 试听</button>
+        <button onclick="event.stopPropagation();toggleRec()" class="primary" id="rec-btn" style="font-size:12px;padding:4px 10px">${rec?'🔁 重录':'🎙 录音'}</button>
+      </div>
+      ${rec?'<span onclick="event.stopPropagation();deleteManual()" style="cursor:pointer;font-size:15px;padding:2px 6px;color:#d9534f;border-radius:4px" title="删除录音" onmouseover="this.style.background=\'#fee\'" onmouseout="this.style.background=\'transparent\'">✕</span>':''}
+      </div></div>`;
   html += `<audio id="player" controls style="width:100%;margin-top:12px;display:none" onended="onPlayerEnded()"></audio>`;
+  // Sentence video preview (original segment)
+  const s = sentences[i] || {};
+  if(s.start != null && s.end != null && s.end > s.start) {
+    html += `<div style="margin-top:14px;padding-top:14px;border-top:1px dashed #ddd">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#888">原视频片段 (${(s.start).toFixed(2)}s ~ ${(s.end).toFixed(2)}s)</span>
+      </div>
+      <video src="${API}/api/project/${encodeURIComponent(curProj)}/sentence-clip/${idx}?v=${activeVersion||''}" controls preload="metadata" style="width:100%;max-height:240px;background:#000;border-radius:6px"></video>
+    </div>`;
+  }
   return html;
 }
 function selectRecItem(i) {
@@ -1733,7 +1765,7 @@ function scrollToActive() {
   const el = document.querySelector('.rec-list .rec-item.active');
   if(el) el.scrollIntoView({block:'nearest', behavior:'smooth'});
 }
-let autoPlayPaused = false, rejectedSet = new Set(), selectedSource = {};  // {idx: 'clone'|'manual'}
+let autoPlayPaused = false, rejectedSet = new Set(), selectedSource = {}, deletedSet = new Set();  // {idx: 'clone'|'manual'}
 function onPlayerEnded() {
   if(autoPlayPaused || curIdx >= sentences.length-1) return;
   const sel = selectedSource[curIdx+1];
@@ -1769,18 +1801,29 @@ function showCountdown(n) {
 function updateRecListItem(i) {
   const items = document.querySelectorAll('.rec-list .rec-item');
   if(!items[i]) return;
-  const confirmed = selectedSource[i+1];
-  const badge = confirmed ? '<span class="rec-badge manual">✓</span>' : '';
-  const badgeEl = items[i].querySelector('.rec-badge');
-  if(badgeEl) badgeEl.outerHTML = badge;
-  else if(badge) items[i].insertAdjacentHTML('beforeend', badge);
-  else if(badgeEl) badgeEl.remove();
+  const idx = i + 1;
+  const confirmed = selectedSource[idx];
+  const isDeleted = deletedSet.has(idx);
+  items[i].style.opacity = isDeleted ? '0.5' : '';
+  // Rebuild badges section after .rec-text
+  const txtEl = items[i].querySelector('.rec-text');
+  if(!txtEl) return;
+  // Remove any existing badge / del-mark
+  let sib = txtEl.nextElementSibling;
+  while(sib) {
+    const next = sib.nextElementSibling;
+    if(sib.classList && (sib.classList.contains('rec-badge') || sib.classList.contains('rec-del-mark'))) sib.remove();
+    sib = next;
+  }
+  if(confirmed) txtEl.insertAdjacentHTML('afterend', '<span class="rec-badge manual">✓</span>');
+  if(isDeleted) items[i].insertAdjacentHTML('beforeend', '<span class="rec-del-mark" style="color:#d9534f;margin-left:4px">✕</span>');
 }
 function updateRecProgress() {
   const total = sentences.length;
-  const done = Object.keys(selectedSource).filter(k => parseInt(k) <= total).length;
+  const done = Object.keys(selectedSource).filter(k => parseInt(k) <= total && !deletedSet.has(parseInt(k))).length;
+  const active = total - deletedSet.size;
   const bar = document.getElementById('rec-progress-bar');
-  if(bar) bar.innerHTML = `已确认 <span style="color:#2a9d3f;font-weight:500">${done}</span> / ${total} 句`;
+  if(bar) bar.innerHTML = `已确认 <span style="color:#2a9d3f;font-weight:500">${done}</span> / ${active} 句${deletedSet.size?`（已删除 <span style="color:#d9534f">${deletedSet.size}</span> 句）`:''}`;
 }
 function startAutoPlay() {
   autoPlayPaused = false;
@@ -2116,6 +2159,23 @@ async function deleteManual() {
   document.getElementById('rec-detail').innerHTML=renderRecDetail();
   toast('已删除','success');
 }
+
+async function deleteSentence(idx) {
+  if(!await showConfirm('删除该句', `确定删除第 ${idx} 句？\n\n删除后该句的字幕、配音、视频片段都不会出现在最终视频里。可以随时恢复。`)) return;
+  await fetch(API+'/api/project/'+curProj+'/delete-sentence/'+idx, {method:'POST'});
+  deletedSet.add(idx);
+  updateRecListItem(idx-1); updateRecProgress();
+  document.getElementById('rec-detail').innerHTML = renderRecDetail();
+  toast('已标记为删除','success');
+}
+
+async function restoreSentence(idx) {
+  await fetch(API+'/api/project/'+curProj+'/restore-sentence/'+idx, {method:'POST'});
+  deletedSet.delete(idx);
+  updateRecListItem(idx-1); updateRecProgress();
+  document.getElementById('rec-detail').innerHTML = renderRecDetail();
+  toast('已恢复','success');
+}
 let _regening = false;
 	async function regenClone() {
 	  if(_regening) return;
@@ -2152,6 +2212,136 @@ async function startCompose() {
   await fetch(API+'/api/project/'+curProj+'/compose',{method:'POST'}); await refreshWork();
 }
 
+let subStyle = null;
+async function goToSubtitlePreview() {
+  // Sync source selections first
+  for(let i=0;i<sentences.length;i++) {
+    const src = selectedSource[i+1];
+    if(src === 'clone' && clonedSet.has(i+1)) {
+      await fetch(API+'/api/project/'+curProj+'/accept-clone/'+(i+1),{method:'POST'});
+    }
+  }
+  subStyle = await (await fetch(API+'/api/project/'+curProj+'/subtitle-style')).json();
+  renderSubtitlePreview();
+}
+
+function renderSubtitlePreview() {
+  const body = document.getElementById('work-body');
+  if(!body) return;
+  const sample = (sentences.find((s, i) => !deletedSet.has(i+1))?.text || '示例字幕');
+  const positionMap = { top: 'top:8%', middle: 'top:50%;transform:translateY(-50%)', bottom: 'bottom:8%' };
+  const posStyle = positionMap[subStyle.position] || positionMap.bottom;
+  body.innerHTML = `
+    <div class="card" style="padding:20px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin:0">🎬 字幕样式预览</h3>
+        <div style="display:flex;gap:8px">
+          <button onclick="refreshWork()">返回</button>
+          <button class="primary" onclick="confirmComposeStart()" style="background:#2a9d3f;border-color:#2a9d3f">✓ 确认并开始生成视频</button>
+        </div>
+      </div>
+      <p style="color:#888;font-size:13px;margin-bottom:16px">调整下方样式参数，预览效果满意后点击「确认并开始生成视频」。生成过程中样式将被烧录到视频中。</p>
+      <div id="sub-preview-stage" style="position:relative;background:#000;border-radius:8px;overflow:hidden;min-height:280px">
+        <img id="sub-preview-img" src="${API}/api/project/${encodeURIComponent(curProj)}/preview-frame?t=${Date.now()}" style="display:block;width:100%;max-height:480px;object-fit:contain">
+        <div id="sub-preview-text" style="position:absolute;left:0;right:0;${posStyle};text-align:center;padding:0 5%;pointer-events:none;
+            font-family:'${subStyle.font_name}', sans-serif;
+            font-size:${subStyle.font_size*1.6}px;
+            color:${subStyle.primary_color};
+            text-shadow:
+              -${subStyle.outline}px -${subStyle.outline}px 0 ${subStyle.outline_color},
+              ${subStyle.outline}px -${subStyle.outline}px 0 ${subStyle.outline_color},
+              -${subStyle.outline}px ${subStyle.outline}px 0 ${subStyle.outline_color},
+              ${subStyle.outline}px ${subStyle.outline}px 0 ${subStyle.outline_color};
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(sample)}</div>
+      </div>
+    </div>
+    <div class="card" style="padding:20px">
+      <h4 style="margin:0 0 12px">样式设置</h4>
+      <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:14px 24px">
+        <div>
+          <label style="display:block;font-size:13px;color:#666;margin-bottom:4px">字体族</label>
+          <select id="ss-font" onchange="updateSubStyle('font_name', this.value)" style="width:100%">
+            <option value="Microsoft YaHei" ${subStyle.font_name==='Microsoft YaHei'?'selected':''}>微软雅黑（默认）</option>
+            <option value="SimHei" ${subStyle.font_name==='SimHei'?'selected':''}>黑体</option>
+            <option value="SimSun" ${subStyle.font_name==='SimSun'?'selected':''}>宋体</option>
+            <option value="KaiTi" ${subStyle.font_name==='KaiTi'?'selected':''}>楷体</option>
+            <option value="FangSong" ${subStyle.font_name==='FangSong'?'selected':''}>仿宋</option>
+            <option value="Microsoft JhengHei" ${subStyle.font_name==='Microsoft JhengHei'?'selected':''}>微软正黑</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:#666;margin-bottom:4px">字体大小：<span id="ss-size-val">${subStyle.font_size}</span></label>
+          <input type="range" min="12" max="60" value="${subStyle.font_size}" id="ss-size" oninput="updateSubStyle('font_size', parseInt(this.value)); document.getElementById('ss-size-val').textContent=this.value" style="width:100%">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:#666;margin-bottom:4px">文字颜色</label>
+          <input type="color" value="${subStyle.primary_color}" oninput="updateSubStyle('primary_color', this.value)" style="width:100%;height:36px;cursor:pointer">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:#666;margin-bottom:4px">描边颜色</label>
+          <input type="color" value="${subStyle.outline_color}" oninput="updateSubStyle('outline_color', this.value)" style="width:100%;height:36px;cursor:pointer">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:#666;margin-bottom:4px">描边粗细：<span id="ss-out-val">${subStyle.outline}</span></label>
+          <input type="range" min="0" max="4" value="${subStyle.outline}" oninput="updateSubStyle('outline', parseInt(this.value)); document.getElementById('ss-out-val').textContent=this.value" style="width:100%">
+        </div>
+        <div>
+          <label style="display:block;font-size:13px;color:#666;margin-bottom:4px">字幕位置</label>
+          <div style="display:flex;gap:6px">
+            <button onclick="updateSubStyle('position','top')" class="${subStyle.position==='top'?'primary':''}" style="flex:1">⬆ 上方</button>
+            <button onclick="updateSubStyle('position','middle')" class="${subStyle.position==='middle'?'primary':''}" style="flex:1">⊙ 中间</button>
+            <button onclick="updateSubStyle('position','bottom')" class="${subStyle.position==='bottom'?'primary':''}" style="flex:1">⬇ 下方</button>
+          </div>
+        </div>
+        <div style="grid-column:1 / -1">
+          <label style="display:block;font-size:13px;color:#666;margin-bottom:4px">边距（与画面边缘的距离）：<span id="ss-mv-val">${subStyle.margin_v}</span></label>
+          <input type="range" min="0" max="200" value="${subStyle.margin_v}" oninput="updateSubStyle('margin_v', parseInt(this.value)); document.getElementById('ss-mv-val').textContent=this.value" style="width:100%">
+        </div>
+      </div>
+    </div>`;
+}
+
+function updateSubStyle(key, val) {
+  if(!subStyle) return;
+  subStyle[key] = val;
+  // Just re-render UI for the preview overlay (cheap; doesn't reload image)
+  const txt = document.getElementById('sub-preview-text');
+  if(!txt) return;
+  const positionMap = { top: 'top:8%', middle: 'top:50%;transform:translateY(-50%)', bottom: 'bottom:8%' };
+  txt.style.cssText = `position:absolute;left:0;right:0;${positionMap[subStyle.position]||positionMap.bottom};text-align:center;padding:0 5%;pointer-events:none;
+    font-family:'${subStyle.font_name}', sans-serif;
+    font-size:${subStyle.font_size*1.6}px;
+    color:${subStyle.primary_color};
+    text-shadow:
+      -${subStyle.outline}px -${subStyle.outline}px 0 ${subStyle.outline_color},
+      ${subStyle.outline}px -${subStyle.outline}px 0 ${subStyle.outline_color},
+      -${subStyle.outline}px ${subStyle.outline}px 0 ${subStyle.outline_color},
+      ${subStyle.outline}px ${subStyle.outline}px 0 ${subStyle.outline_color};
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+  // Update the position buttons highlighting
+  if(key === 'position') {
+    const card = document.querySelector('#work-body .card:nth-child(2)');
+    if(card) {
+      card.querySelectorAll('button').forEach(b => {
+        if(b.textContent.includes('上方')) b.className = subStyle.position==='top'?'primary':'';
+        else if(b.textContent.includes('中间')) b.className = subStyle.position==='middle'?'primary':'';
+        else if(b.textContent.includes('下方')) b.className = subStyle.position==='bottom'?'primary':'';
+      });
+    }
+  }
+}
+
+async function confirmComposeStart() {
+  // Save style
+  await fetch(API+'/api/project/'+curProj+'/subtitle-style', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(subStyle)
+  });
+  // Then call compose
+  await fetch(API+'/api/project/'+curProj+'/compose',{method:'POST'});
+  await refreshWork();
+}
+
 // Keyboard
 document.addEventListener('keydown', e => {
   if(e.target.tagName==='TEXTAREA'||e.target.tagName==='INPUT') return;
@@ -2170,7 +2360,17 @@ async function refreshI2VProjects() {
     `<div class="proj${curI2V===p.name?' active':''}" onclick="openI2V('${p.name}')">${p.name} <span style="float:right;font-size:11px">${p.stage==='done'?'✓':''}</span></div>`
   ).join('');
 }
-function showI2VNew() { curI2V=null; curProj=null; refreshProjects(); refreshI2VProjects(); show('v-i2v-new'); }
+function showI2VNew() {
+  curI2V=null; curProj=null;
+  refreshProjects(); refreshI2VProjects();
+  // Reset form fields to fresh state
+  document.getElementById('i2v-name').value = '';
+  document.getElementById('i2v-name').readOnly = false;
+  document.getElementById('i2v-name').style.background = '';
+  document.getElementById('i2v-theme').value = '';
+  i2vFiles = []; renderI2VUploadPreview();
+  show('v-i2v-new');
+}
 
 const i2vDz = document.getElementById('i2v-drop-zone');
 i2vDz.ondragover = e => { e.preventDefault(); i2vDz.classList.add('dragover'); };
@@ -2231,17 +2431,40 @@ async function submitI2VNew() {
   const name = document.getElementById('i2v-name').value.trim();
   if(!name) return toast('请输入项目名', 'warn');
   if(!i2vFiles.length) return toast('请上传至少一张图片', 'warn');
-  const fd = new FormData();
-  fd.append('name', name);
-  fd.append('theme', document.getElementById('i2v-theme').value);
-  i2vFiles.forEach((f,i) => fd.append(`image_${i}`, f));
+  const theme = document.getElementById('i2v-theme').value;
+  // Continuation mode: name matches a cleared project (curI2V was kept after reset)
+  const continuing = (curI2V === name);
   document.getElementById('btn-i2v-create').disabled = true;
   document.getElementById('btn-i2v-create').textContent = '上传中...';
-  await fetch(API+'/api/img2vid', {method:'POST', body:fd});
-  document.getElementById('btn-i2v-create').disabled = false;
-  document.getElementById('btn-i2v-create').textContent = '创建项目并AI分析';
-  const theme = document.getElementById('i2v-theme').value;
+  try {
+    if(continuing) {
+      // Update theme + add images, then trigger analyze
+      await fetch(API+'/api/img2vid/'+name+'/theme', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({theme})
+      });
+      const fd = new FormData();
+      i2vFiles.forEach((f,i) => fd.append(`image_${i}`, f));
+      await fetch(API+'/api/img2vid/'+name+'/add-images', {method:'POST', body:fd});
+    } else {
+      const fd = new FormData();
+      fd.append('name', name);
+      fd.append('theme', theme);
+      i2vFiles.forEach((f,i) => fd.append(`image_${i}`, f));
+      const r = await fetch(API+'/api/img2vid', {method:'POST', body:fd});
+      if(!r.ok) {
+        const err = await r.json().catch(()=>({error:'创建失败'}));
+        toast(err.error || '创建失败', 'error');
+        return;
+      }
+    }
+  } finally {
+    document.getElementById('btn-i2v-create').disabled = false;
+    document.getElementById('btn-i2v-create').textContent = '创建项目并AI分析';
+  }
   document.getElementById('i2v-name').value = '';
+  document.getElementById('i2v-name').readOnly = false;
+  document.getElementById('i2v-name').style.background = '';
   document.getElementById('i2v-theme').value = '';
   i2vFiles = [];
   renderI2VUploadPreview();
@@ -2306,6 +2529,33 @@ async function deleteCurI2V() {
   show('v-empty'); refreshI2VProjects();
 }
 
+async function resetCurI2V() {
+  if(!curI2V) return;
+  const st = await (await fetch(API+'/api/img2vid/'+curI2V)).json();
+  const busy = ['analyzing','generating'].includes(st.stage);
+  if(busy) {
+    const ok = await showConfirm('警告：AI 任务运行中', `项目「${curI2V}」正在${st.stage==='analyzing'?'AI 分析':'视频生成'}中！\n\n清除数据将强制中断 AI 任务。\n\n确定要清空吗？`);
+    if(!ok) return;
+  } else {
+    if(!await showConfirm('清除数据', `确定清空项目「${curI2V}」的所有数据？\n\n将删除图片、旁白、声音样本和已生成的视频，回到新建状态。此操作不可撤销。`)) return;
+  }
+  clearInterval(i2vPollTimer);
+  await fetch(API+'/api/img2vid/'+curI2V+'/reset', {method:'POST'});
+  // Return to "new project" state with name + theme pre-filled
+  const name = curI2V;
+  const theme = st.theme || '';
+  i2vImages = []; i2vNarration = []; i2vFiles = [];
+  // Switch to new-project view, keep curI2V so submitI2VNew knows we are continuing
+  show('v-i2v-new');
+  document.getElementById('i2v-name').value = name;
+  document.getElementById('i2v-name').readOnly = true;
+  document.getElementById('i2v-name').style.background = '#f5f5f5';
+  document.getElementById('i2v-theme').value = theme;
+  renderI2VUploadPreview();
+  refreshI2VProjects();
+  toast('数据已清空，请重新上传图片', 'success');
+}
+
 async function refreshI2VWork() {
   if(!curI2V) return;
   const st = await (await fetch(API+'/api/img2vid/'+curI2V)).json();
@@ -2341,6 +2591,16 @@ function renderI2VStages(stage) {
 }
 
 function renderI2VImages(body, st) {
+  if(!i2vImages.length) {
+    body.innerHTML = `
+      <div class="card" style="text-align:center;padding:40px">
+        <div style="font-size:48px;margin-bottom:12px">📷</div>
+        <p style="color:#888;margin-bottom:16px">项目为空，请上传图片</p>
+        <input type="file" id="i2v-add-file" accept="image/*" multiple style="display:none" onchange="onI2VAddFiles(event)">
+        <button class="primary" onclick="document.getElementById('i2v-add-file').click()">+ 上传图片</button>
+      </div>`;
+    return;
+  }
   let html = `<p style="margin-bottom:12px">${i2vImages.length} 张图片 · 拖拽图片可调整顺序，调整后点击分析</p>`;
   html += `<div class="img-grid" id="i2v-project-grid">`;
   i2vImages.forEach((img, i) => {
@@ -2357,8 +2617,27 @@ function renderI2VImages(body, st) {
     </div>`;
   });
   html += `</div>`;
-  html += `<div style="margin-top:16px"><button class="primary" onclick="startI2VAnalyze()">✨ 开始AI分析并生成旁白</button></div>`;
+  html += `<div style="margin-top:16px;display:flex;gap:8px">
+    <input type="file" id="i2v-add-file" accept="image/*" multiple style="display:none" onchange="onI2VAddFiles(event)">
+    <button onclick="document.getElementById('i2v-add-file').click()">+ 继续添加图片</button>
+    <button class="primary" onclick="startI2VAnalyze()">✨ 开始AI分析并生成旁白</button>
+  </div>`;
   body.innerHTML = html;
+}
+
+async function onI2VAddFiles(e) {
+  const files = Array.from(e.target.files || []);
+  if(!files.length) return;
+  const fd = new FormData();
+  files.forEach((f,i) => fd.append(`image_${i}`, f));
+  const r = await fetch(API+'/api/img2vid/'+curI2V+'/add-images', {method:'POST', body:fd});
+  if(!r.ok) {
+    const err = await r.json().catch(()=>({error:'上传失败'}));
+    return toast(err.error || '上传失败', 'error');
+  }
+  e.target.value = '';
+  i2vImages = await (await fetch(API+'/api/img2vid/'+curI2V+'/images')).json();
+  renderI2VImages(document.getElementById('i2v-body'), {});
 }
 
 let i2vProjDragSrc = null;

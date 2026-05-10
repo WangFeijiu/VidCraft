@@ -68,7 +68,20 @@
       "Bash(git commit -m ' *)",
       "Bash(git commit *)",
       "Bash(pip list *)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(git remote *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "Bash([ -f \"E:/视频处理/voice_studio/projects/flowbrain/$f\" ])",
+      "Bash(node *)",
+      "Bash(del test_syntax.js)",
+      "Bash(E:/视频处理/.venv/Scripts/python.exe *)",
+      "Bash(mv voice_sample.wav _voice_raw.webm)",
+      "Bash(\"C:/ffmpeg/ffmpeg.exe\" -y -i _voice_raw.webm -ar 24000 -ac 1 -f wav voice_sample.wav)",
+      "Bash(\"D:/Tech/program/python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe\" -y -i img2vid/rag科普/_voice_raw.webm -ar 24000 -ac 1 -f wav img2vid/rag科普/voice_sample.wav)",
+      "Bash(\"D:/Tech/program/python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe\" -i \"E:/视频处理/voice_studio/projects/flowbrain/clips/_test.mp4\")",
+      "Bash(git -C \"E:/视频处理\" add .claude/settings.local.json voice_studio/app.py voice_studio/templates/index.html)",
+      "Bash(git -C E:/视频处理 commit -m ' *)"
     ]
   }
 }
