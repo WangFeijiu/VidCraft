@@ -2335,6 +2335,13 @@ def api_tool_download(sid):
     return send_file(str(p), mimetype=mime, as_attachment=True,
                      attachment_filename=f"{base}_output{p.suffix}")
 
+@app.route("/api/tool/<sid>", methods=["DELETE"])
+def api_tool_delete(sid):
+    d = _tool_session(sid)
+    if d.exists():
+        shutil.rmtree(str(d), ignore_errors=True)
+    return jsonify({"ok": True})
+
 def _parse_ts(s):
     """Parse timestamp like 01:20.5 or 00:01:20.5 to seconds."""
     parts = s.strip().split(":")
