@@ -1,0 +1,2114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voice Studio</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Microsoft YaHei','PingFang SC',sans-serif;background:#f0f2f5;color:#333;display:flex;height:100vh}
+#sidebar{width:240px;background:#1e1e2e;color:#ccc;padding:20px 12px;overflow-y:auto;flex-shrink:0;display:flex;flex-direction:column}
+#sidebar h3{color:#fff;font-size:15px;margin-bottom:10px;padding:0 6px}
+#sidebar .section{margin-bottom:16px}
+#sidebar .proj{padding:7px 10px;border-radius:6px;cursor:pointer;margin-bottom:3px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sidebar .proj:hover{background:#2a2a3e}
+#sidebar .proj.active{background:#3a3a5e;color:#fff}
+#sidebar .spacer{flex:1}
+#sidebar button{width:100%;padding:7px;background:#4a9eff;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px}
+#sidebar button:hover{background:#3a8adf}
+#sidebar .btn-sm{padding:6px;font-size:12px;margin-top:6px;background:#3a7dd4}
+#sidebar .btn-settings{margin-top:8px;background:#555;border:none;color:#ccc}
+#sidebar .btn-settings:hover{background:#666}
+#sidebar .divider{height:1px;background:#333;margin:12px 0}
+#main{flex:1;padding:30px;overflow-y:auto}
+h2{margin-bottom:20px}
+.card{background:#fff;border-radius:12px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.stage-bar{display:flex;gap:4px;margin-bottom:24px}
+.stage-bar .step{flex:1;padding:8px 4px;text-align:center;font-size:12px;border-radius:6px;background:#eee;color:#888}
+.stage-bar .step.done{background:#d4edda;color:#155724}
+.stage-bar .step.active{background:#cce5ff;color:#004085;font-weight:bold}
+textarea.sent-row{width:100%;font-size:15px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;resize:vertical;font-family:inherit;line-height:1.5;overflow:hidden;min-height:40px}
+textarea.sent-row:focus{outline:none;border-color:#4a9eff}
+.sent-item{display:flex;align-items:start;gap:8px;margin-bottom:6px}
+.sent-item .chk{margin-top:10px;width:16px;height:16px;cursor:pointer;accent-color:#4a9eff}
+.sent-item.selected .sent-row{border-color:#4a9eff;background:#f0f7ff}
+.sent-item .idx{min-width:30px;font-size:12px;color:#888;padding-top:10px;text-align:right}
+.sent-item .dur{min-width:80px;font-size:11px;color:#aaa;padding-top:12px}
+button{padding:8px 16px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;font-size:14px}
+button:hover{background:#f5f5f5}
+button.primary{background:#4a9eff;color:#fff;border-color:#4a9eff}
+button.primary:hover{background:#3a8adf}
+button:disabled{opacity:.4;cursor:not-allowed}
+.sent-box{background:#fff;border-radius:12px;padding:24px;margin:24px 0;min-height:100px;font-size:28px;line-height:1.6;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+button.recording{background:#d9534f;color:#fff;border-color:#d9534f;animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(217,83,79,.7)}50%{box-shadow:0 0 0 10px rgba(217,83,79,0)}}
+.status{color:#888;font-size:14px;margin:8px 0}
+.status.ok{color:#2a9d3f}
+audio{width:100%;margin:8px 0}
+.upload-area{border:2px dashed #ccc;border-radius:12px;padding:40px;text-align:center;cursor:pointer}
+.upload-area:hover{border-color:#4a9eff}
+.upload-area.dragover{border-color:#4a9eff;background:#f0f7ff}
+input[type=text],input[type=password],input[type=number],select{padding:8px 12px;border:1px solid #ccc;border-radius:6px;font-size:14px}
+.hidden{display:none!important}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0;align-items:center}
+.toolbar .sep{width:1px;height:24px;background:#ddd;margin:0 4px}
+
+/* Modal */
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:100;display:flex;align-items:center;justify-content:center}
+.modal{background:#fff;border-radius:12px;padding:28px;width:520px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.15)}
+.modal h3{margin-bottom:16px;font-size:18px}
+.modal label{display:block;margin:12px 0 4px;font-size:14px;color:#555}
+.modal input,.modal select{width:100%;margin-bottom:8px}
+.modal .btn-row{display:flex;gap:8px;margin-top:20px;justify-content:flex-end}
+
+/* Preview diff */
+.preview-area{max-height:400px;overflow-y:auto;border:1px solid #ddd;border-radius:8px;padding:12px;margin:16px 0;background:#fafafa;font-size:14px;line-height:1.8}
+.preview-area .old{color:#999;text-decoration:line-through}
+.preview-area .new{color:#2a9d3f;font-weight:500}
+
+/* Tabs */
+.tabs{display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #eee}
+.tab{padding:10px 24px;cursor:pointer;font-size:15px;color:#888;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tab.active{color:#4a9eff;border-bottom-color:#4a9eff;font-weight:500}
+.tab:hover{color:#333}
+
+/* Progress bar */
+.progress-bar{background:#eee;border-radius:8px;height:8px;margin:12px 0;overflow:hidden}
+.progress-bar .fill{background:#4a9eff;height:100%;border-radius:8px;transition:width .3s}
+
+/* Image grid */
+.img-grid{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}
+.img-card{width:130px;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1);overflow:hidden;position:relative;cursor:grab;transition:transform .15s,box-shadow .15s}
+.img-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.img-card.dragging{opacity:.4;transform:scale(.95)}
+.img-card.drag-over{border:2px solid #6c5ce7;transform:scale(1.03)}
+.img-card img{width:130px;height:90px;object-fit:cover;display:block}
+.img-card .img-idx{position:absolute;top:4px;left:4px;background:rgba(108,92,231,.85);color:#fff;font-size:13px;font-weight:700;padding:2px 7px;border-radius:4px;min-width:20px;text-align:center}
+.img-card .img-name{font-size:10px;color:#888;padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.img-card .img-ctrl{display:flex;gap:0}
+.img-card .img-ctrl button{flex:1;border:none;border-radius:0;padding:4px;font-size:12px;background:#f5f5f5;cursor:pointer}
+.img-card .img-ctrl button:hover{background:#e0e0e0}
+.img-card .img-ctrl button:disabled{opacity:.3}
+.img-card .img-remove{position:absolute;top:4px;right:4px;background:rgba(217,83,79,.85);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
+.img-card .img-remove:hover{background:#c9302c}
+.upload-preview{margin:16px 0;padding:16px;background:#fafafa;border-radius:8px;border:1px solid #eee}
+
+/* Toast */
+#toast-wrap{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:10px;pointer-events:none}
+.toast{pointer-events:auto;min-width:280px;max-width:420px;padding:14px 20px;border-radius:10px;color:#fff;font-size:14px;line-height:1.5;box-shadow:0 4px 20px rgba(0,0,0,.18);animation:toastIn .3s ease;display:flex;align-items:start;gap:10px}
+.toast.info{background:#4a9eff}
+.toast.success{background:#2a9d3f}
+.toast.error{background:#d9534f}
+.toast.warn{background:#f0ad4e;color:#333}
+.toast .toast-icon{font-size:18px;flex-shrink:0;margin-top:1px}
+.toast .toast-msg{flex:1;white-space:pre-line}
+.toast .toast-close{background:none;border:none;color:inherit;opacity:.6;cursor:pointer;font-size:16px;padding:0;margin-top:1px}
+.toast .toast-close:hover{opacity:1}
+@keyframes toastIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+@keyframes toastOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(40px)}}
+
+/* Export dropdown */
+.export-wrap{position:relative;display:inline-block}
+.export-menu{position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);width:100%;z-index:50;display:none;overflow:hidden}
+.export-menu .item{padding:10px 16px;cursor:pointer;font-size:14px;transition:background .15s}
+.export-menu .item:hover{background:#f0f7ff}
+.export-menu.show{display:block}
+
+/* Lyric panel */
+.rec-layout{display:flex;gap:0;border:1px solid #ddd;border-radius:12px;overflow:hidden;height:calc(100vh - 260px)}
+.rec-list{width:45%;overflow-y:auto;border-right:1px solid #eee;padding:8px 0;flex-shrink:0}
+.rec-list .rec-item{padding:10px 16px;cursor:pointer;font-size:13px;border-left:3px solid transparent;transition:background .15s;display:flex;align-items:center;gap:8px}
+.rec-list .rec-item:hover{background:#f5f5f5}
+.rec-list .rec-item.active{background:#e8f4ff;border-left-color:#4a9eff}
+.rec-list .rec-item .rec-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.4}
+.rec-list .rec-item .rec-badge{font-size:10px;padding:2px 6px;border-radius:3px;flex-shrink:0;font-weight:500}
+.rec-list .rec-item .rec-badge.clone{background:#e8f4ff;color:#4a9eff}
+.rec-list .rec-item .rec-badge.manual{background:#d4edda;color:#2a9d3f}
+.rec-list .rec-item .rec-badge.none{background:#f0f0f0;color:#aaa}
+.rec-list .rec-item .rec-idx{min-width:24px;color:#999;font-size:11px;text-align:right;flex-shrink:0}
+.rec-detail{flex:1;padding:20px;overflow-y:auto;display:flex;flex-direction:column}
+@keyframes countPulse{0%{transform:scale(1.4);opacity:0.5}50%{transform:scale(1);opacity:1}100%{transform:scale(0.95);opacity:0.8}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="toast-wrap"></div>
+<div id="sidebar">
+  <div class="section">
+    <h3>视频配音</h3>
+    <div id="proj-list"></div>
+    <button class="btn-sm" onclick="showNew()">+ 新建配音项目</button>
+  </div>
+  <div class="divider"></div>
+  <div class="section">
+    <h3>图生视频</h3>
+    <div id="i2v-list"></div>
+    <button class="btn-sm" style="background:#6c5ce7" onclick="showI2VNew()">+ 新建图生视频</button>
+  </div>
+  <div class="divider"></div>
+  <div class="section">
+    <h3>工具</h3>
+    <button class="btn-sm" style="background:#6c5ce7" onclick="showVEditor()">✂ 视频编辑</button>
+    <button class="btn-sm" style="background:#2a9d3f;margin-top:6px" onclick="showConvert()">⇄ 格式转换</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn-settings" onclick="showSettings()">设置</button>
+</div>
+<div id="main">
+
+  <!-- Global task status bar -->
+  <div id="task-bar" class="hidden" style="background:#fff3cd;padding:8px 16px;margin:-20px -30px 16px;border-bottom:1px solid #ffc107;font-size:13px;display:flex;align-items:center;gap:8px">
+    <div class="progress-bar" style="flex:1;max-width:300px;margin:0"><div class="fill" id="task-bar-fill" style="width:50%"></div></div>
+    <span id="task-bar-msg">处理中...</span>
+  </div>
+
+  <!-- ====== Video Dubbing Views ====== -->
+  <div id="v-new" class="hidden">
+    <h2>新建配音项目</h2>
+    <div class="card">
+      <p style="margin-bottom:12px">项目名称</p>
+      <input type="text" id="new-name" placeholder="例: flowbrain" style="width:300px">
+      <p style="margin:16px 0 12px">上传视频 <span style="color:#aaa">(支持 MP4/AVI/MKV/MOV/WebM 等格式，自动转码)</span></p>
+      <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <p style="font-size:40px">🎥</p>
+        <p style="margin-top:8px;color:#888">拖拽视频到此处，或点击选择文件</p>
+        <input type="file" id="file-input" accept="video/*" style="display:none" onchange="onFileSelect(event)">
+        <div id="file-name" style="margin-top:8px;color:#4a9eff"></div>
+      </div>
+      <button class="primary" style="margin-top:16px" onclick="submitNew()" id="btn-create">创建项目</button>
+    </div>
+  </div>
+
+  <div id="v-work" class="hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 id="work-title" style="margin-bottom:0"></h2>
+      <div style="display:flex;gap:8px">
+        <button onclick="resetProject()" style="font-size:13px;padding:6px 14px;background:#f0ad4e;color:#fff;border:none;border-radius:6px;cursor:pointer">清除数据</button>
+        <button onclick="deleteCurProject()" style="font-size:13px;padding:6px 14px;background:#d9534f;color:#fff;border:none;border-radius:6px;cursor:pointer">删除项目</button>
+      </div>
+    </div>
+    <div class="stage-bar" id="stages"></div>
+    <div id="work-body"></div>
+  </div>
+
+  <!-- ====== Image-to-Video Views ====== -->
+  <div id="v-i2v-new" class="hidden">
+    <h2>新建图生视频</h2>
+    <div class="card">
+      <p style="margin-bottom:12px">项目名称</p>
+      <input type="text" id="i2v-name" placeholder="例: 我的产品介绍" style="width:300px">
+      <p style="margin:16px 0 12px">主题说明 <span style="color:#aaa">(可选：描述视频主题或顺序逻辑)</span></p>
+      <input type="text" id="i2v-theme" placeholder="例: 介绍我的新产品，从外观到功能" style="width:100%">
+      <p style="margin:16px 0 12px">上传图片 <span style="color:#aaa">(最多 60 张，可多选或拖拽，支持拖拽排序)</span></p>
+      <div class="upload-area" id="i2v-drop-zone" onclick="document.getElementById('i2v-file-input').click()">
+        <p style="font-size:40px">🖼</p>
+        <p style="margin-top:8px;color:#888">拖拽图片到此处，或点击选择多张图片</p>
+        <input type="file" id="i2v-file-input" accept="image/*" multiple style="display:none" onchange="onI2VFileSelect(event)">
+      </div>
+      <div id="i2v-upload-preview" class="upload-preview hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span id="i2v-file-count" style="font-weight:500"></span>
+          <button onclick="clearI2VFiles()" style="font-size:12px;padding:4px 10px">清空全部</button>
+        </div>
+        <div class="img-grid" id="i2v-preview-grid"></div>
+      </div>
+      <button class="primary" style="margin-top:16px" onclick="submitI2VNew()" id="btn-i2v-create">创建项目并AI分析</button>
+    </div>
+  </div>
+
+  <div id="v-i2v-work" class="hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 id="i2v-title" style="margin-bottom:0"></h2>
+      <button onclick="deleteCurI2V()" style="font-size:13px;padding:6px 14px;background:#d9534f;color:#fff;border:none;border-radius:6px;cursor:pointer">删除项目</button>
+    </div>
+    <div class="stage-bar" id="i2v-stages"></div>
+    <div id="i2v-body"></div>
+  </div>
+
+  <!-- ====== Format Convert ====== -->
+  <div id="v-convert" class="hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 style="margin-bottom:0">格式转换</h2>
+      <button onclick="show('v-empty')" style="font-size:13px;padding:6px 14px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer">返回</button>
+    </div>
+    <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">
+      <video id="cv-video" controls style="width:100%;max-height:360px;display:block"></video>
+    </div>
+    <div class="card">
+      <p style="color:#888;margin-bottom:12px">将视频转换为其他格式或分辨率</p>
+      <label style="display:block;margin:8px 0 4px;font-weight:500">输出格式</label>
+      <select id="cv-format" style="width:100%">
+        <option value="mp4">MP4 (H264)</option>
+        <option value="avi">AVI (MPEG4)</option>
+        <option value="mkv">MKV (H264)</option>
+        <option value="mov">MOV (H264)</option>
+        <option value="webm">WebM (VP9)</option>
+      </select>
+      <label style="display:block;margin:12px 0 4px;font-weight:500">分辨率</label>
+      <select id="cv-res" style="width:100%">
+        <option value="original">原始分辨率</option>
+        <option value="1080p">1920x1080 (1080p)</option>
+        <option value="720p">1280x720 (720p)</option>
+        <option value="480p">854x480 (480p)</option>
+        <option value="360p">640x360 (360p)</option>
+      </select>
+      <div id="cv-status" style="margin-top:12px;color:#888;font-size:13px"></div>
+      <div class="btn-row" style="margin-top:16px">
+        <button class="primary" onclick="startConvert()">开始转换</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== Video Editor ====== -->
+  <div id="v-veditor" class="hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 style="margin-bottom:0">视频编辑</h2>
+      <button onclick="show('v-empty')" style="font-size:13px;padding:6px 14px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer">返回</button>
+    </div>
+    <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">
+      <video id="ve-video" controls style="width:100%;max-height:360px;display:block"></video>
+    </div>
+    <div class="card">
+      <div class="tabs" style="margin-bottom:12px">
+        <div class="tab active" onclick="showVETab('delete')" id="vet-tab-delete">删除片段</div>
+        <div class="tab" onclick="showVETab('insert-video')" id="vet-tab-insert-video">插入视频</div>
+        <div class="tab" onclick="showVETab('insert-images')" id="vet-tab-insert-images">插入图片</div>
+        <div class="tab" onclick="showVETab('speedup')" id="vet-tab-speedup">变速剪辑</div>
+      </div>
+
+      <!-- Delete -->
+      <div id="vet-delete">
+        <p style="color:#888;margin-bottom:8px">输入要删除的时间段（秒），多个用逗号分隔</p>
+        <input type="text" id="ve-ranges" style="width:100%" placeholder="例: 10-11, 20-21, 30-32">
+        <p style="color:#aaa;font-size:12px;margin-top:4px">格式：起始秒-结束秒，如 10-11 表示删除第10到11秒</p>
+        <div class="btn-row"><button class="primary danger" onclick="veDelete()">删除指定片段</button></div>
+      </div>
+
+      <!-- Insert Video -->
+      <div id="vet-insert-video" class="hidden">
+        <p style="color:#888;margin-bottom:8px">上传一段视频并指定插入位置 <span style="color:#aaa">(支持 MP4/AVI/MKV/MOV 等)</span></p>
+        <label style="display:block;margin:8px 0 4px">插入位置（秒）</label>
+        <input type="number" id="ve-ins-pos" style="width:120px" placeholder="0" min="0" step="0.1" value="0">
+        <label style="display:block;margin:12px 0 4px">选择视频文件</label>
+        <input type="file" id="ve-ins-file" accept="video/*,.avi,.mkv,.mov,.wmv,.flv,.webm,.ts" style="margin-bottom:8px">
+        <div class="btn-row"><button class="primary" onclick="veInsertVideo()">插入视频</button></div>
+      </div>
+
+      <!-- Insert Images -->
+      <div id="vet-insert-images" class="hidden">
+        <p style="color:#888;margin-bottom:8px">上传图片并提供字幕，系统将生成视频片段并插入</p>
+        <label style="display:block;margin:8px 0 4px">插入位置（秒）</label>
+        <input type="number" id="ve-img-pos" style="width:120px" placeholder="0" min="0" step="0.1" value="0">
+        <label style="display:block;margin:12px 0 4px">选择图片（可多选）</label>
+        <input type="file" id="ve-img-files" accept="image/*" multiple style="margin-bottom:8px">
+        <label style="display:block;margin:12px 0 4px">每张图片的字幕（一行一句，按图片顺序）</label>
+        <textarea id="ve-img-subs" rows="4" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;font-size:14px" placeholder="第一张图片的旁白&#10;第二张图片的旁白&#10;第三张图片的旁白"></textarea>
+        <div class="btn-row"><button class="primary" onclick="veInsertImages()">生成并插入</button></div>
+      </div>
+
+      <!-- Speed Up -->
+      <div id="vet-speedup" class="hidden">
+        <p style="color:#888;margin-bottom:8px">指定视频片段快进，去掉原音频，允许重新录制旁白</p>
+        <div style="display:flex;gap:12px;align-items:center;margin:8px 0">
+          <label>起始（秒）<input type="number" id="ve-speed-start" style="width:80px;margin-left:4px" placeholder="0" min="0" step="0.1" value="0"></label>
+          <label>结束（秒）<input type="number" id="ve-speed-end" style="width:80px;margin-left:4px" placeholder="10" min="0" step="0.1" value="10"></label>
+          <label>倍速
+            <select id="ve-speed-rate" style="margin-left:4px">
+              <option value="2">2x</option>
+              <option value="4" selected>4x</option>
+              <option value="8">8x</option>
+              <option value="16">16x</option>
+            </select>
+          </label>
+        </div>
+        <p id="ve-speed-preview" style="color:#aaa;font-size:12px"></p>
+        <div class="btn-row"><button class="primary" onclick="veSpeedUp()">变速并去音频</button></div>
+        <div id="ve-speed-record" class="hidden" style="margin-top:16px;padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee">
+          <p style="color:#888;margin-bottom:8px">变速完成，请录制新的旁白音频：</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button id="ve-speed-rec-btn" class="primary" onclick="veSpeedRecord()">🎙 开始录音</button>
+            <span id="ve-speed-rec-status" style="color:#888;font-size:13px"></span>
+          </div>
+          <div id="ve-speed-rec-player" style="margin-top:8px;display:none">
+            <audio id="ve-speed-audio" controls style="width:100%"></audio>
+            <div style="margin-top:8px"><button class="primary" onclick="veSpeedMerge()">合成视频</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="ve-status" style="margin-top:12px;color:#888;font-size:13px"></div>
+    </div>
+  </div>
+
+  <!-- ====== Empty state ====== -->
+  <div id="v-empty">
+    <h2>Voice Studio</h2>
+    <div class="card" style="text-align:center;padding:60px">
+      <div style="font-size:48px">🎙</div>
+      <h3 style="margin:16px 0 8px">视频配音 & 图生视频 工作台</h3>
+      <p style="color:#888;margin-bottom:8px">视频配音：上传视频 → 编辑字幕 → 录音 → 生成成品</p>
+      <p style="color:#888">图生视频：上传图片 → AI生成旁白 → 自动配音 → 生成视频</p>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div id="modal-settings" class="modal-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+  <div class="modal" style="width:600px">
+    <h3>LLM 设置</h3>
+    <div id="llm-list" style="margin-bottom:12px"></div>
+    <button onclick="addLLMConfig()" style="font-size:13px;padding:4px 12px;margin-bottom:12px">+ 新增配置</button>
+    <div id="llm-editor" style="display:none;padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee">
+      <input type="hidden" id="cfg-edit-idx" value="-1">
+      <label style="display:block;margin-bottom:6px">配置名称</label>
+      <input type="text" id="cfg-name" placeholder="如：Kimi / GPT-4o" style="width:100%;margin-bottom:8px">
+      <label style="display:block;margin-bottom:6px">Provider</label>
+      <select id="cfg-provider" onchange="onProviderChange()" style="width:100%;margin-bottom:8px">
+        <option value="openai">OpenAI 兼容 (DeepSeek / Qwen 等)</option>
+        <option value="anthropic">Anthropic 兼容 (Claude / 智谱等)</option>
+      </select>
+      <label style="display:block;margin-bottom:6px">Model</label>
+      <input type="text" id="cfg-model" placeholder="gpt-4o" style="width:100%;margin-bottom:8px">
+      <label style="display:block;margin-bottom:6px">API Key</label>
+      <input type="text" id="cfg-key" placeholder="sk-..." style="width:100%;margin-bottom:8px">
+      <label style="display:block;margin-bottom:6px">Base URL</label>
+      <input type="text" id="cfg-base" placeholder="https://api.openai.com/v1" style="width:100%;margin-bottom:8px">
+      <div class="btn-row">
+        <button onclick="testLLM()" id="btn-test">测试连接</button>
+        <button class="primary" onclick="saveLLM()">保存配置</button>
+        <button onclick="cancelLLMEdit()">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Preview modal -->
+<div id="modal-preview" class="modal-overlay hidden" onclick="if(event.target===this)closePreview()">
+  <div class="modal" style="width:680px">
+    <h3 id="preview-title">预览</h3>
+    <div class="preview-area" id="preview-body"></div>
+    <div class="btn-row">
+      <button onclick="closePreview()">取消</button>
+      <button class="primary" onclick="confirmPreview()">确认替换</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+const API = '';
+let projects = [], curProj = null, sentences = [], curIdx = 0;
+let mediaRecorder = null, chunks = [], isRecording = false;
+let recordedSet = new Set(), clonedSet = new Set(), dragFile = null;
+let mergeSelection = new Set(), pendingResult = null;
+let sentenceVersions = {}; // {original: [...], optimized: [...], uploaded: [...]}
+let activeVersion = 'original'; // current active version
+
+// WebSocket connection
+const socket = io({
+  transports: ['websocket'],
+  upgrade: false,
+  reconnectionAttempts: 30,
+  reconnectionDelay: 3000,
+  timeout: 120000
+});
+socket.on('project_update', (data) => {
+  if(data.project === curProj && data.state) {
+    renderFromState(data.state);
+  }
+});
+socket.on('reconnect', () => {
+  if(curProj) refreshWork();
+});
+socket.on('optimize_progress', (data) => {
+  if(data.project !== curProj) return;
+  const body = document.getElementById('work-body');
+  if(!body) return;
+  if(data.step === 'done') {
+    // Reload and switch to optimized
+    loadSentenceVersions().then(() => {
+      activeVersion = 'optimized';
+      sentences = sentenceVersions['optimized'] || sentences;
+      renderEditor(body);
+      toast(data.msg, 'success');
+    });
+  } else if(data.step === 'error') {
+    showLLMError(data.msg);
+    renderEditor(body);
+  } else {
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:36px;animation:spin 2s linear infinite;display:inline-block">✨</div>
+      <p style="margin-top:12px;font-weight:500">AI 优化中</p>
+      <p style="color:#888;font-size:13px;margin-top:8px">${data.msg}</p>
+      <div class="progress-bar" style="max-width:300px;margin:12px auto"><div class="fill" style="width:${data.progress}%"></div></div>
+      <p style="color:#aaa;font-size:12px">${data.progress}%</p>
+    </div>`;
+  }
+});
+socket.on('match_progress', (data) => {
+  console.log('[match_progress]', data);
+  if(data.project !== curProj) {
+    console.log('[match_progress] project mismatch:', data.project, 'vs', curProj);
+    return;
+  }
+  const body = document.getElementById('work-body');
+  if(!body) {
+    console.log('[match_progress] work-body not found');
+    return;
+  }
+  if(data.step === 'done') {
+    console.log('[match_progress] done, showing preview');
+    // Show preview - use optimized version if available, otherwise original
+    const origSentences = sentenceVersions['optimized'] || sentenceVersions['original'] || sentences;
+    console.log('[match_progress] origSentences length:', origSentences.length, 'result length:', data.result.length);
+    pendingResult = data.result;
+    pendingResult._version = 'uploaded';
+    try {
+      showPreview('字幕匹配结果', origSentences, data.result);
+      console.log('[match_progress] preview shown successfully');
+    } catch(e) {
+      console.error('[match_progress] showPreview error:', e);
+      console.error('[match_progress] stack:', e.stack);
+      toast('显示预览失败: ' + e.message, 'error');
+      renderEditor(body);
+    }
+  } else if(data.step === 'error') {
+    showLLMError(data.msg);
+    renderEditor(body);
+  } else {
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:36px;animation:spin 2s linear infinite;display:inline-block">📤</div>
+      <p style="margin-top:12px;font-weight:500">字幕匹配中</p>
+      <p style="color:#888;font-size:13px;margin-top:8px">${data.msg}</p>
+      <div class="progress-bar" style="max-width:300px;margin:12px auto"><div class="fill" style="width:${data.progress}%"></div></div>
+      <p style="color:#aaa;font-size:12px">${data.progress}%</p>
+    </div>`;
+  }
+});
+
+// Render UI directly from WebSocket state (no HTTP request)
+function renderFromState(st) {
+  const body = document.getElementById('work-body');
+  if(!body) return;
+  if(st.stage === 'processing') {
+    let progressHtml = '';
+    if(st.transcribe_progress) {
+      const [curr, total] = st.transcribe_progress;
+      const pct = total > 0 ? Math.round(curr / total * 100) : 0;
+      progressHtml = `<div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888;font-size:13px">${pct}%</p>`;
+    }
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">⏳</div><p style="margin-top:12px">${st.msg||'处理中...'}</p>${progressHtml}</div>`;
+  } else if(st.stage === 'cloning') {
+    const prog = st.clone_progress || [0, 1];
+    const pct = prog[1]>0 ? Math.round(prog[0]/prog[1]*100) : 0;
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'音色克隆中...'}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888">${prog[0]}/${prog[1]}</p></div>`;
+  } else if(st.stage === 'composing') {
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎬</div><p style="margin-top:12px">${st.msg||'生成中...'}</p></div>`;
+  } else {
+    // For editing/recording/done/error, do a full refresh (needs sentence data)
+    refreshWork();
+  }
+}
+
+// Confirm dialog replacement
+function showConfirm(title, message) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `<div class="modal" style="max-width:420px">
+      <h3>${escHtml(title)}</h3>
+      ${message ? `<p style="margin:16px 0;line-height:1.6;color:#666">${escHtml(message)}</p>` : ''}
+      <div class="btn-row">
+        <button onclick="this.closest('.modal-overlay').remove();window._confirmResolve(false)">取消</button>
+        <button class="primary" onclick="this.closest('.modal-overlay').remove();window._confirmResolve(true)">确定</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    window._confirmResolve = resolve;
+  });
+}
+
+// Load sentence versions
+async function loadSentenceVersions() {
+  const r = await fetch(API+'/api/project/'+curProj+'/sentences');
+  const data = await r.json();
+  activeVersion = data.active;
+  sentenceVersions = data.versions;
+  sentences = data.sentences;
+}
+
+// Switch to a different version
+function switchVersion(version) {
+  if(!sentenceVersions[version]) return;
+  activeVersion = version;
+  sentences = sentenceVersions[version];
+  renderEditor(document.getElementById('work-body'));
+  toast(`已切换到：${version === 'original' ? '原始转写' : version === 'optimized' ? 'AI 优化' : '用户上传'}`, 'success');
+}
+
+
+// ── Toast notification ────────────────────────────────────────────
+const TOAST_ICONS = {info:'ℹ',success:'✓',error:'✕',warn:'⚠'};
+function toast(msg, type='info', duration=4000) {
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.innerHTML = `<span class="toast-icon">${TOAST_ICONS[type]||'ℹ'}</span><span class="toast-msg">${escHtml(msg)}</span><button class="toast-close" onclick="this.parentElement.remove()">✕</button>`;
+  wrap.appendChild(el);
+  setTimeout(()=>{el.style.animation='toastOut .3s ease forwards';setTimeout(()=>el.remove(),300)}, duration);
+}
+
+async function safeJSON(r) {
+  const text = await r.text();
+  try { return JSON.parse(text); } catch { throw new Error('服务器返回非JSON响应，请检查后端是否正常运行'); }
+}
+let i2vProjects = [], curI2V = null, i2vNarration = [];
+let i2vImages = [], i2vFiles = [], i2vPollTimer = null;
+
+// Global task lock — only one GPU/LLM-heavy task at a time
+let activeTask = null; // { project, type: 'video'|'img2vid', startedAt }
+function isTaskBusy() { return activeTask !== null; }
+function lockTask(project, type) {
+  if (activeTask) {
+    if (activeTask.project === project) return true; // same project, ok to continue polling
+    return false; // different project is busy
+  }
+  activeTask = { project, type, startedAt: Date.now() };
+  document.getElementById('task-bar').classList.remove('hidden');
+  return true;
+}
+function unlockTask() {
+  activeTask = null;
+  document.getElementById('task-bar').classList.add('hidden');
+}
+function updateTaskBar(msg, pct) {
+  document.getElementById('task-bar-msg').textContent = msg;
+  document.getElementById('task-bar-fill').style.width = pct + '%';
+}
+function checkTaskConflict(newProject, newType) {
+  if (!activeTask) return true;
+  // Same type of resource (GPU, LLM) = conflict
+  const gpuTypes = ['transcribe','compose','cloning','ve_delete','ve_insert','i2v_analyze','i2v_generate'];
+  if (activeTask.project === newProject) return true; // same project always ok
+  // Different projects but same resource type
+  return false; // block
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════════════════════
+async function init() {
+  await Promise.all([refreshProjects(), refreshI2VProjects()]);
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    mediaRecorder = new MediaRecorder(stream, {mimeType:'audio/webm;codecs=opus'});
+    mediaRecorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
+    mediaRecorder.onstop = onRecStop;
+  } catch(e) { console.warn('mic:', e); }
+}
+init();
+
+document.addEventListener('click', e => {
+  const menu = document.getElementById('export-menu');
+  if(!menu) return;
+  const wrap = menu.closest('.export-wrap');
+  if(wrap && !wrap.contains(e.target)) menu.classList.remove('show');
+});
+
+function show(id) {
+  ['v-new','v-work','v-i2v-new','v-i2v-work','v-empty','v-convert','v-veditor'].forEach(v => document.getElementById(v).classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Video Dubbing — Projects
+// ═══════════════════════════════════════════════════════════════
+async function refreshProjects() {
+  projects = await (await fetch(API+'/api/projects')).json();
+  document.getElementById('proj-list').innerHTML = projects.map(p =>
+    `<div class="proj${curProj===p.name?' active':''}" onclick="openProject('${p.name}')">${p.name} <span style="float:right;font-size:11px">${p.stage==='done'?'✓':''}</span></div>`
+  ).join('');
+}
+function showNew() { curProj=null; curI2V=null; refreshProjects(); refreshI2VProjects(); show('v-new'); }
+
+const dz = document.getElementById('drop-zone');
+dz.ondragover = e => { e.preventDefault(); dz.classList.add('dragover'); };
+dz.ondragleave = () => dz.classList.remove('dragover');
+dz.ondrop = e => { e.preventDefault(); dz.classList.remove('dragover');
+  if(e.dataTransfer.files[0]) { dragFile=e.dataTransfer.files[0]; document.getElementById('file-name').textContent=dragFile.name; }};
+function onFileSelect(e) { if(e.target.files[0]) { dragFile=e.target.files[0]; document.getElementById('file-name').textContent=dragFile.name; }}
+
+async function submitNew() {
+  const name = document.getElementById('new-name').value.trim();
+  if(!name) return toast('请输入项目名', 'warn');
+  const file = dragFile || document.getElementById('file-input').files[0];
+  if(!file) return toast('请上传视频', 'warn');
+  const fd = new FormData(); fd.append('name', name); fd.append('video', file);
+  document.getElementById('btn-create').disabled = true; document.getElementById('btn-create').textContent = '上传中...';
+  await fetch(API+'/api/projects', {method:'POST', body:fd});
+  dragFile = null;
+  document.getElementById('btn-create').disabled = false; document.getElementById('btn-create').textContent = '创建项目';
+  document.getElementById('new-name').value = ''; document.getElementById('file-name').textContent = '';
+  openProject(name);
+}
+
+async function openProject(name) {
+  curProj = name; curI2V = null; curIdx = 0; mergeSelection = new Set(); sentences = [];
+  clearInterval(i2vPollTimer);
+  refreshProjects(); refreshI2VProjects();
+  show('v-work');
+  document.getElementById('work-title').textContent = name;
+  await refreshWork();
+}
+
+let _refreshing = false;
+async function refreshWork() {
+  if(!curProj || _refreshing) return;
+  _refreshing = true;
+  try {
+  const st = await (await fetch(API+'/api/project/'+curProj)).json();
+  renderStages(st.stage);
+  const body = document.getElementById('work-body');
+  if(st.stage === 'processing') {
+    let progressHtml = '';
+    if(st.transcribe_progress) {
+      const [curr, total] = st.transcribe_progress;
+      const pct = total > 0 ? Math.round(curr / total * 100) : 0;
+      progressHtml = `<div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888;font-size:13px">${pct}%</p>`;
+    }
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">⏳</div><p style="margin-top:12px">${st.msg||'处理中...'}</p>${progressHtml}</div>`;
+  } else if(st.stage === 'editing') {
+    if(!sentences.length) await loadSentenceVersions();
+    if(!sentences.length) {
+      renderReupload(body);
+    } else {
+      renderEditor(body);
+    }
+  } else if(st.stage === 'recording') {
+    if(!sentences.length) await loadSentenceVersions();
+    const rec = await (await fetch(API+'/api/project/'+curProj+'/recorded')).json();
+    recordedSet = new Set(rec);
+    const cln = await (await fetch(API+'/api/project/'+curProj+'/cloned')).json();
+    clonedSet = new Set(cln);
+    renderRecorder(body);
+  } else if(st.stage === 'composing') {
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎬</div><p style="margin-top:12px">${st.msg||'生成中...'}</p></div>`;
+  } else if(st.stage === 'cloning') {
+    if(!sentences.length) await loadSentenceVersions();
+    const prog = st.clone_progress || [0, sentences.length];
+    const pct = prog[1]>0 ? Math.round(prog[0]/prog[1]*100) : 0;
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'音色克隆中...'}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888">${prog[0]}/${prog[1]}</p></div>`;
+  } else if(st.stage === 'done') {
+        body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px">✅</div><h3 style="margin:12px 0">视频已生成</h3><a href="${API}/api/project/${curProj}/download" class="primary" style="display:inline-block;padding:12px 32px;text-decoration:none;border-radius:8px;background:#4a9eff;color:#fff">⬇ 下载最终视频</a><p style="margin-top:16px"><button onclick="curProj=null;show('v-empty')">返回</button></p></div>`;
+  } else if(st.stage === 'error') {
+    body.innerHTML = `<div class="card" style="padding:24px;color:#d9534f"><b>错误：</b><br>${(st.msg||'').replace(/\n/g,'<br>')}</div><div style="margin-top:12px"><button onclick="backFromError()">← 返回编辑字幕</button></div>`;
+  } else { body.innerHTML = ''; }
+  } finally { _refreshing = false; }
+}
+
+function renderStages(stage) {
+  const steps = [{k:'editing',l:'编辑'},{k:'recording',l:'录音'},{k:'composing',l:'生成'}];
+  let hit = false;
+  document.getElementById('stages').innerHTML = steps.map(s => {
+    const cls = stage===s.k?'active':(hit?'':'done'); if(stage===s.k) hit=true;
+    return `<div class="step ${cls}">${s.l}</div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Editor + Merge + Optimize + Upload Subtitles
+// ═══════════════════════════════════════════════════════════════
+
+function toggleExportMenu(e) {
+  e.stopPropagation();
+  document.getElementById('export-menu').classList.toggle('show');
+}
+function doExport(fmt) {
+  document.getElementById('export-menu').classList.remove('show');
+  window.location = `${API}/api/project/${curProj}/export?format=${fmt}&version=${activeVersion}`;
+}
+async function goToEditing() {
+  await fetch(API+'/api/project/'+curProj+'/stage', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({stage:'editing'})});
+  sentences = [];
+  await refreshWork();
+}
+async function backFromError() {
+  await fetch(API+'/api/project/'+curProj+'/stage', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({stage:'recording'})});
+  sentences = [];
+  await refreshWork();
+}
+
+function renderReupload(body) {
+  body.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+    <div style="font-size:48px">🎬</div>
+    <p style="margin-top:12px;color:#888">数据已清空，请重新上传视频</p>
+    <input type="file" id="reupload-input" accept="video/*" style="display:none" onchange="doReupload()">
+    <button class="primary" style="margin-top:16px" onclick="document.getElementById('reupload-input').click()">上传视频</button>
+  </div>`;
+}
+async function doReupload() {
+  const file = document.getElementById('reupload-input').files[0];
+  if(!file) return;
+  const fd = new FormData(); fd.append('video', file);
+  document.getElementById('work-body').innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">⏳</div><p style="margin-top:12px">上传中...</p></div>`;
+  await fetch(API+'/api/project/'+curProj+'/reupload', {method:'POST', body:fd});
+  sentences = [];
+  await refreshWork();
+}
+
+function renderEditor(body) {
+  mergeSelection = new Set();
+
+  // Version selector
+  const versionNames = {original: '原始转写', optimized: 'AI 优化', uploaded: '用户上传'};
+  const availableVersions = Object.keys(sentenceVersions);
+  let versionHtml = '';
+  if(availableVersions.length > 1) {
+    versionHtml = `<div style="margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:6px;display:flex;align-items:center;gap:8px">
+      <span style="font-size:13px;color:#666">字幕版本：</span>
+      ${availableVersions.map(v =>
+        `<button class="btn-sm" style="background:${v===activeVersion?'#007bff':'#6c757d'}" onclick="switchVersion('${v}')">${versionNames[v]||v}</button>`
+      ).join('')}
+      <span style="margin-left:auto;font-size:12px;color:#888">当前：${versionNames[activeVersion]||activeVersion}</span>
+    </div>`;
+  }
+
+  let html = versionHtml + `<div class="toolbar">
+    <button class="primary" onclick="saveSentences()">💾 保存字幕</button><div class="sep"></div>
+    <button onclick="mergeSelected()" id="btn-merge" disabled>🔗 合并选中</button>
+    <button onclick="clearMergeSelection()">取消选择</button><div class="sep"></div>
+    <button onclick="doOptimize()">✨ AI优化</button>
+    <button onclick="uploadSubtitles()">📝 上传字幕</button><div class="sep"></div>
+    <div class="export-wrap">
+      <button onclick="toggleExportMenu(event)">📝 导出字幕 ▼</button>
+      <div class="export-menu" id="export-menu">
+        <div class="item" onclick="doExport('srt')">📄 SRT 字幕</div>
+        <div class="item" onclick="doExport('txt')">📄 TXT 文本</div>
+        <div class="item" onclick="doExport('json')">📄 JSON 数据</div>
+      </div>
+    </div>
+  </div>`;
+  html += `<p style="margin-bottom:8px;color:#888;font-size:13px">共 ${sentences.length} 句 · 勾选连续句子可合并</p>`;
+  html += sentences.map((s,i) =>
+    `<div class="sent-item" id="si-${i}"><input type="checkbox" class="chk" data-i="${i}" onchange="onCheckMerge(${i},this.checked)"><span class="idx">${i+1}</span><textarea class="sent-row" rows="1" data-i="${i}" oninput="autoGrow(this)">${s.text}</textarea><span class="dur">${fmtS(s.start)}→${fmtS(s.end)}</span></div>`
+  ).join('');
+  html += `<div style="margin-top:16px"><button class="primary" onclick="saveSentences()">💾 保存字幕，进入录音</button></div>`;
+  body.innerHTML = html;
+  body.querySelectorAll('textarea').forEach(autoGrow);
+}
+function autoGrow(el) { el.style.height='auto'; el.style.height=Math.max(el.scrollHeight,40)+'px'; }
+
+function onCheckMerge(idx, checked) {
+  if(checked) {
+    if(mergeSelection.size > 0) {
+      const sorted = [...mergeSelection].sort((a,b)=>a-b);
+      if(idx < sorted[0]-1 || idx > sorted[sorted.length-1]+1) {
+        toast('只能选择连续的句子', 'warn');
+        const cb = document.querySelector(`.chk[data-i="${idx}"]`); if(cb) cb.checked = false;
+        return;
+      }
+    }
+    mergeSelection.add(idx);
+  } else { mergeSelection.delete(idx); }
+  document.querySelectorAll('.sent-item').forEach((el,i) => el.classList.toggle('selected', mergeSelection.has(i)));
+  document.getElementById('btn-merge').disabled = mergeSelection.size < 2;
+}
+function clearMergeSelection() {
+  mergeSelection = new Set();
+  document.querySelectorAll('.chk').forEach(c => c.checked = false);
+  document.querySelectorAll('.sent-item').forEach(el => el.classList.remove('selected'));
+  document.getElementById('btn-merge').disabled = true;
+}
+function mergeSelected() {
+  if(mergeSelection.size < 2) return;
+  const sorted = [...mergeSelection].sort((a,b)=>a-b);
+  const merged = {text: sorted.map(i=>sentences[i].text).join(' '), start: sentences[sorted[0]].start, end: sentences[sorted[sorted.length-1]].end};
+  sentences.splice(sorted[0], sorted.length, merged);
+  renderEditor(document.getElementById('work-body'));
+}
+async function saveSentences() {
+  document.querySelectorAll('.sent-row').forEach((ta,i) => { if(sentences[i]) sentences[i].text = ta.value; });
+  await fetch(API+'/api/project/'+curProj+'/sentences', {
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({version: activeVersion, sentences, clear_after: false})
+  });
+  // Update local version cache
+  sentenceVersions[activeVersion] = sentences;
+  toast('字幕已保存', 'success');
+  await refreshWork();
+}
+async function checkLLM() {
+  try {
+    const r = await fetch(API+'/api/llm-config');
+    const cfg = await r.json();
+    // Check if any config exists
+    if (!cfg.configs || cfg.configs.length === 0) {
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.innerHTML = `<div class="modal" style="max-width:480px">
+        <h3>需要配置 LLM</h3>
+        <p style="margin:16px 0;line-height:1.6">AI 优化功能需要配置大语言模型（LLM）才能使用。</p>
+        <p style="margin:16px 0;color:#888;font-size:14px">点击下方按钮前往设置页面配置 API Key。</p>
+        <div class="btn-row">
+          <button onclick="this.closest('.modal-overlay').remove()">取消</button>
+          <button class="primary" onclick="this.closest('.modal-overlay').remove();showSettings()">前往设置</button>
+        </div>
+      </div>`;
+      document.body.appendChild(modal);
+      return false;
+    }
+    // Check if active config has valid key (not empty after masking)
+    const activeIdx = cfg.active_idx || 0;
+    const activeConfig = cfg.configs[activeIdx];
+    if (!activeConfig || !activeConfig.api_key || activeConfig.api_key === '****') {
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.innerHTML = `<div class="modal" style="max-width:480px">
+        <h3>LLM 配置不完整</h3>
+        <p style="margin:16px 0;line-height:1.6">当前 LLM 配置缺少有效的 API Key。</p>
+        <p style="margin:16px 0;color:#888;font-size:14px">请前往设置页面检查配置。</p>
+        <div class="btn-row">
+          <button onclick="this.closest('.modal-overlay').remove()">取消</button>
+          <button class="primary" onclick="this.closest('.modal-overlay').remove();showSettings()">前往设置</button>
+        </div>
+      </div>`;
+      document.body.appendChild(modal);
+      return false;
+    }
+    return true;
+  } catch(e) {
+    toast('无法连接服务器，请检查应用是否正在运行', 'error');
+    return false;
+  }
+}
+
+function showLLMError(errorMsg) {
+  let title = 'AI 处理失败';
+  let suggestion = '';
+  const msg = errorMsg.toLowerCase();
+
+  if(msg.includes('quota') || msg.includes('insufficient') || msg.includes('exceeded')) {
+    title = 'API 额度不足';
+    suggestion = '您的 API Key 额度已用完，请前往服务商充值或更换 API Key。';
+  } else if(msg.includes('invalid') && msg.includes('key')) {
+    title = 'API Key 无效';
+    suggestion = 'API Key 格式错误或已失效，请检查配置。';
+  } else if(msg.includes('rate limit')) {
+    title = '请求过于频繁';
+    suggestion = '触发了 API 速率限制，请稍后再试。';
+  } else if(msg.includes('timeout') || msg.includes('timed out')) {
+    title = '请求超时';
+    suggestion = 'API 响应超时，请检查网络连接或稍后重试。';
+  } else if(msg.includes('model') && (msg.includes('not found') || msg.includes('does not exist'))) {
+    title = '模型不存在';
+    suggestion = '配置的模型名称不正确，请检查 LLM 设置中的模型名称。';
+  } else if(msg.includes('connection') || msg.includes('network')) {
+    title = '网络连接失败';
+    suggestion = '无法连接到 API 服务器，请检查网络或 Base URL 配置。';
+  }
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `<div class="modal" style="max-width:520px">
+    <h3 style="color:#d9534f">${escHtml(title)}</h3>
+    <div style="margin:16px 0;padding:12px;background:#fff3cd;border-left:3px solid #ffc107;border-radius:4px">
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#856404">${escHtml(errorMsg)}</p>
+    </div>
+    ${suggestion ? `<p style="margin:16px 0;line-height:1.6;color:#666">${escHtml(suggestion)}</p>` : ''}
+    <div class="btn-row">
+      <button onclick="this.closest('.modal-overlay').remove()">关闭</button>
+      ${suggestion.includes('配置') || suggestion.includes('设置') ? '<button class="primary" onclick="this.closest(\'.modal-overlay\').remove();showSettings()">前往设置</button>' : ''}
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+
+async function doOptimize() {
+  if(!await checkLLM()) return;
+  // Ask user for video description
+  const desc = await showOptimizeInput();
+  if(desc === null) return; // cancelled
+  const body = document.getElementById('work-body');
+  body.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+    <div style="font-size:36px;animation:spin 2s linear infinite;display:inline-block">✨</div>
+    <p style="margin-top:12px;font-weight:500">AI 优化中</p>
+    <p style="color:#888;font-size:13px;margin-top:8px">正在发送请求...</p>
+    <div class="progress-bar" style="max-width:300px;margin:12px auto"><div class="fill" style="width:5%"></div></div>
+  </div>`;
+  try {
+    const r = await fetch(API+'/api/project/'+curProj+'/optimize', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version: activeVersion, description: desc})});
+    const data = await safeJSON(r);
+    if(data.error) { showLLMError(data.error); renderEditor(body); return; }
+  } catch(e) { showLLMError('请求失败: '+e.message); renderEditor(body); }
+}
+
+function showOptimizeInput() {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `<div class="modal" style="max-width:500px">
+      <h3>AI 优化字幕</h3>
+      <p style="margin:12px 0;color:#666;line-height:1.6">请简要描述这个视频的内容，帮助 AI 更好地理解语境：</p>
+      <textarea id="opt-desc-input" rows="3" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:14px;resize:vertical" placeholder="例如：这是一个介绍如何使用 Notion 做笔记的教程视频"></textarea>
+      <p style="margin-top:8px;color:#aaa;font-size:12px">留空也可以，AI 会自动分析内容</p>
+      <div class="btn-row">
+        <button onclick="this.closest('.modal-overlay').remove();window._optResolve(null)">取消</button>
+        <button class="primary" onclick="const v=document.getElementById('opt-desc-input').value.trim();this.closest('.modal-overlay').remove();window._optResolve(v)">开始优化</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    window._optResolve = resolve;
+    setTimeout(() => document.getElementById('opt-desc-input')?.focus(), 100);
+  });
+}
+function uploadSubtitles() {
+  const inp = document.createElement('input'); inp.type='file'; inp.accept='.srt,.txt,.json';
+  inp.onchange = async e => {
+    const file = e.target.files[0]; if(!file) return;
+    const text = await file.text(); let lines = [];
+    if(file.name.endsWith('.srt')) {
+      const parsed = parseSRTWithTiming(text);
+      if(parsed.length > 0 && parsed[0].start !== undefined) {
+        const ok = await showConfirm('上传字幕', `检测到 ${parsed.length} 句带时间戳的字幕，是否直接替换现有字幕？\n\n选择「确定」直接替换并保留时间戳；\n选择「取消」则只提取文本进行语义匹配。`);
+        if(ok) {
+          await fetch(API+'/api/project/'+curProj+'/sentences', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(parsed)});
+          sentences = parsed;
+          renderEditor(document.getElementById('work-body'));
+          toast('字幕已替换','success');
+          return;
+        }
+      }
+      lines = parseSRT(text);
+    }
+    else if(file.name.endsWith('.json')) { try{const a=JSON.parse(text);lines=a.map(s=>typeof s==='string'?s:s.text)}catch{lines=text.split('\n').map(l=>l.trim()).filter(Boolean)}}
+    else lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+    if(!lines.length) { toast('未解析到内容','warn'); return; }
+    await doMatch(lines);
+  }; inp.click();
+}
+function parseSRT(text) {
+  return text.trim().split(/\n\s*\n/).map(b => {
+    const parts = b.split('\n').filter(l=>l.trim());
+    return parts.filter((p,i) => !(i===0&&/^\d+$/.test(p.trim())) && !(i<=1&&/\d{2}:\d{2}/.test(p))).join(' ');
+  }).filter(Boolean);
+}
+async function doMatch(userLines) {
+  if(!await checkLLM()) return;
+  const body = document.getElementById('work-body');
+  body.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+    <div style="font-size:36px;animation:spin 2s linear infinite;display:inline-block">📤</div>
+    <p style="margin-top:12px;font-weight:500">字幕匹配中</p>
+    <p style="color:#888;font-size:13px;margin-top:8px">正在发送请求...</p>
+    <div class="progress-bar" style="max-width:300px;margin:12px auto"><div class="fill" style="width:5%"></div></div>
+  </div>`;
+  try {
+    const r = await fetch(API+'/api/project/'+curProj+'/match-subtitles', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({subtitles:userLines})});
+    const data = await safeJSON(r);
+    if(data.error) { showLLMError(data.error); renderEditor(body); }
+    // async mode: progress comes via WebSocket
+  } catch(e) { showLLMError('请求失败: '+e.message); renderEditor(body); }
+}
+function showPreview(title, oldS, newS) {
+  console.log('[showPreview] start', title, 'oldS:', oldS.length, 'newS:', newS.length);
+  document.getElementById('preview-title').textContent = title;
+  const hasSource = newS.some(n => n.source);
+  console.log('[showPreview] hasSource:', hasSource);
+
+  if(hasSource) {
+    const container = document.getElementById('preview-body');
+    container.innerHTML = `<p style="margin-bottom:12px;color:#888;font-size:13px">原始 ${oldS.length} 句 → 优化后 ${newS.length} 句</p>`;
+    console.log('[showPreview] container cleared');
+
+    // Use DocumentFragment for batch DOM operations
+    const fragment = document.createDocumentFragment();
+
+    // Count how many times each old sentence is referenced (for split detection)
+    const oldRefCount = new Map();
+    newS.forEach(nw => {
+      (nw.source || []).forEach(oldIdx => {
+        oldRefCount.set(oldIdx, (oldRefCount.get(oldIdx) || 0) + 1);
+      });
+    });
+    console.log('[showPreview] oldRefCount built, size:', oldRefCount.size);
+
+    // Track which old sentences have been matched
+    const matchedOld = new Set();
+    newS.forEach(nw => {
+      (nw.source || []).forEach(oldIdx => matchedOld.add(oldIdx));
+    });
+    console.log('[showPreview] matchedOld built, size:', matchedOld.size);
+
+    let lastMatchedOld = 0;
+    let rowCount = 0;
+    newS.forEach((nw, newIdx) => {
+      if(newIdx % 20 === 0) console.log('[showPreview] processing newIdx:', newIdx);
+      const sources = nw.source || [newIdx+1];
+      const isMerge = sources.length > 1;
+      const isSplit = sources.length === 1 && oldRefCount.get(sources[0]) > 1;
+
+      // Show unmatched old sentences before this new sentence
+      const minSource = Math.min(...sources);
+      const unmatchedCount = minSource - lastMatchedOld - 1;
+      if(unmatchedCount > 0) {
+        console.log('[showPreview] showing', unmatchedCount, 'unmatched before newIdx:', newIdx);
+      }
+      for(let oldIdx = lastMatchedOld + 1; oldIdx < minSource; oldIdx++) {
+        if(!matchedOld.has(oldIdx)) {
+          const row = document.createElement('div');
+          row.style.cssText = 'display:grid;grid-template-columns:1fr 40px 1fr;gap:12px;margin-bottom:16px;align-items:center';
+          row.innerHTML = `<div style="padding:6px 10px;background:#fff3cd;border-radius:4px;border-left:3px solid #ffc107">
+            <div style="font-size:11px;color:#aaa">${oldIdx}.</div>
+            <div style="font-size:13px;color:#856404">${escHtml((oldS[oldIdx-1]?.text || '').substring(0, 100))}</div>
+          </div>
+          <div style="text-align:center;color:#ccc;font-size:20px">✗</div>
+          <div style="padding:8px 12px;background:#f8f8f8;border-radius:0 4px 4px 0;border-left:3px solid #ccc">
+            <div style="font-size:12px;color:#999">未匹配</div>
+          </div>`;
+          fragment.appendChild(row);
+          rowCount++;
+        }
+      }
+      lastMatchedOld = Math.max(...sources);
+
+      const row = document.createElement('div');
+      row.style.cssText = 'display:grid;grid-template-columns:1fr 40px 1fr;gap:12px;margin-bottom:16px;align-items:center';
+
+      // Left: original sentences
+      let leftHtml = '<div>';
+      sources.forEach((oldIdx, i) => {
+        const oldText = (oldS[oldIdx-1]?.text || '').substring(0, 100);
+        leftHtml += `<div style="padding:6px 10px;background:#f9f9f9;border-radius:4px;margin-bottom:${i<sources.length-1?'4px':'0'}">
+          <div style="font-size:11px;color:#aaa">${oldIdx}.</div>
+          <div style="font-size:13px;color:#666;text-decoration:line-through">${escHtml(oldText)}</div>
+        </div>`;
+      });
+      leftHtml += '</div>';
+
+      // Middle: arrow
+      const arrowHtml = '<div style="text-align:center;color:#888;font-size:20px">→</div>';
+
+      // Right: new sentence
+      let tag = '';
+      if(isMerge) {
+        tag = `<span style="background:#fff3cd;padding:2px 6px;border-radius:3px;font-size:10px;color:#856404;margin-left:6px">合并${sources.length}句</span>`;
+      } else if(isSplit) {
+        tag = `<span style="background:#d1ecf1;padding:2px 6px;border-radius:3px;font-size:10px;color:#0c5460;margin-left:6px">拆分${oldRefCount.get(sources[0])}句</span>`;
+      }
+      const rightHtml = `<div style="padding:8px 12px;background:#f0f9ff;border-radius:0 4px 4px 0;border-left:3px solid ${isMerge?'#f0ad4e':isSplit?'#17a2b8':'#2a9d3f'}">
+        <div style="font-size:11px;color:#aaa;margin-bottom:4px">${newIdx+1}. ${tag}</div>
+        <div style="font-size:14px;color:#2a9d3f;font-weight:500">${escHtml(nw.text.substring(0, 100))}</div>
+        <div style="font-size:11px;color:#aaa;margin-top:4px">${fmtS(nw.start)} → ${fmtS(nw.end)}</div>
+      </div>`;
+
+      row.innerHTML = leftHtml + arrowHtml + rightHtml;
+      fragment.appendChild(row);
+      rowCount++;
+    });
+    console.log('[showPreview] main loop done, rowCount:', rowCount);
+
+    // Show remaining unmatched old sentences at the end
+    const remainingUnmatched = oldS.length - lastMatchedOld;
+    if(remainingUnmatched > 0) {
+      console.log('[showPreview] showing', remainingUnmatched, 'remaining unmatched');
+    }
+    for(let oldIdx = lastMatchedOld + 1; oldIdx <= oldS.length; oldIdx++) {
+      if(!matchedOld.has(oldIdx)) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:grid;grid-template-columns:1fr 40px 1fr;gap:12px;margin-bottom:16px;align-items:center';
+        row.innerHTML = `<div style="padding:6px 10px;background:#fff3cd;border-radius:4px;border-left:3px solid #ffc107">
+          <div style="font-size:11px;color:#aaa">${oldIdx}.</div>
+          <div style="font-size:13px;color:#856404">${escHtml((oldS[oldIdx-1]?.text || '').substring(0, 100))}</div>
+        </div>
+        <div style="text-align:center;color:#ccc;font-size:20px">✗</div>
+        <div style="padding:8px 12px;background:#f8f8f8;border-radius:0 4px 4px 0;border-left:3px solid #ccc">
+          <div style="font-size:12px;color:#999">未匹配</div>
+        </div>`;
+        fragment.appendChild(row);
+        rowCount++;
+      }
+    }
+    console.log('[showPreview] remaining unmatched done, total rowCount:', rowCount);
+
+    console.log('[showPreview] appending fragment to container');
+    container.appendChild(fragment);
+    console.log('[showPreview] fragment appended');
+  } else {
+    const html = newS.map((nw,i) =>
+      `<div style="margin-bottom:4px"><span style="color:#aaa;font-size:12px">${i+1}.</span> <span class="old">${escHtml(oldS[i]?.text||'')}</span> <span style="color:#888">→</span> <span class="new">${escHtml(nw.text)}</span> <span style="color:#aaa;font-size:11px">(${fmtS(nw.start)}→${fmtS(nw.end)})</span></div>`
+    ).join('');
+    document.getElementById('preview-body').innerHTML = html;
+  }
+  console.log('[showPreview] showing modal');
+  document.getElementById('modal-preview').classList.remove('hidden');
+  console.log('[showPreview] done');
+}
+function closePreview() { document.getElementById('modal-preview').classList.add('hidden'); pendingResult=null; if(curProj) renderEditor(document.getElementById('work-body')); }
+async function confirmPreview() {
+  if(pendingResult && curProj) {
+    const version = pendingResult._version || 'optimized'; // default to optimized for AI results
+    delete pendingResult._version;
+
+    // Save to specific version
+    await fetch(API+'/api/project/'+curProj+'/sentences', {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({version, sentences: pendingResult, clear_after: false})
+    });
+
+    // Reload versions and switch to new version
+    await loadSentenceVersions();
+    activeVersion = version;
+    sentences = sentenceVersions[version];
+
+    toast(`已应用${version === 'optimized' ? 'AI 优化' : version === 'uploaded' ? '上传' : ''}字幕`, 'success');
+  }
+  closePreview();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LLM Settings
+// ═══════════════════════════════════════════════════════════════
+let llmFullConfig = null;
+
+async function showSettings() {
+  try {
+    const r = await fetch(API+'/api/llm-config');
+    llmFullConfig = await r.json();
+    renderLLMList();
+  } catch(e) { console.warn('load config:', e); }
+  document.getElementById('llm-editor').style.display = 'none';
+  document.getElementById('modal-settings').classList.remove('hidden');
+}
+
+function renderLLMList() {
+  const cfg = llmFullConfig;
+  const configs = cfg.configs || [];
+  const activeIdx = cfg.active_idx || 0;
+  const html = configs.map((c, i) => {
+    const active = i === activeIdx;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:4px;border-radius:6px;background:${active?'#e8f4ff':'#fff'};border:1px solid ${active?'#4a9eff':'#eee'}">
+      <span style="flex:1;font-size:14px;${active?'font-weight:500;color:#4a9eff':''}">${escHtml(c.name||'未命名')} <span style="color:#aaa;font-size:12px">(${c.provider}/${c.model})</span></span>
+      ${active?'<span style="font-size:11px;color:#2a9d3f;background:#d4edda;padding:1px 6px;border-radius:3px">当前使用</span>':''}
+      ${!active?`<button onclick="setActiveLLM(${i})" style="font-size:12px;padding:2px 8px">使用</button>`:''}
+      <button onclick="editLLMConfig(${i})" style="font-size:12px;padding:2px 8px">编辑</button>
+      ${configs.length>1?`<button onclick="deleteLLMConfig(${i})" style="font-size:12px;padding:2px 8px;color:#d9534f">删除</button>`:''}
+      <button onclick="quickTestLLM(${i})" style="font-size:12px;padding:2px 8px;color:#4a9eff">测试</button>
+    </div>`;
+  }).join('');
+  document.getElementById('llm-list').innerHTML = html || '<p style="color:#888;padding:8px">暂无配置，请点击下方添加</p>';
+}
+
+function addLLMConfig() {
+  document.getElementById('cfg-edit-idx').value = '-1';
+  document.getElementById('cfg-name').value = '';
+  document.getElementById('cfg-provider').value = 'openai';
+  document.getElementById('cfg-model').value = '';
+  document.getElementById('cfg-key').value = '';
+  document.getElementById('cfg-key').placeholder = 'sk-...';  document.getElementById('cfg-base').value = '';
+  onProviderChange();
+  document.getElementById('llm-editor').style.display = 'block';
+}
+
+function editLLMConfig(idx) {
+  const c = llmFullConfig.configs[idx];
+  document.getElementById('cfg-edit-idx').value = idx;
+  document.getElementById('cfg-name').value = c.name || '';
+  document.getElementById('cfg-provider').value = c.provider || 'openai';
+  document.getElementById('cfg-model').value = c.model || '';
+  document.getElementById('cfg-key').value = c.api_key || '';
+  document.getElementById('cfg-key').placeholder = 'sk-...';
+  document.getElementById('cfg-base').value = c.base_url || '';
+  onProviderChange();
+  document.getElementById('llm-editor').style.display = 'block';
+}
+
+function cancelLLMEdit() {
+  document.getElementById('llm-editor').style.display = 'none';
+}
+
+function onProviderChange() {
+  const p = document.getElementById('cfg-provider').value;
+  document.getElementById('cfg-base').placeholder = p==='anthropic' ? 'https://api.anthropic.com/v1' : 'https://api.openai.com/v1';
+  document.getElementById('cfg-model').placeholder = p==='anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o';
+}
+
+async function setLLMActive(idx) {
+  llmFullConfig.active_idx = idx;
+  await fetch(API+'/api/llm-config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(llmFullConfig)});
+  renderLLMList();
+  toast('已切换到: '+(llmFullConfig.configs[idx].name||'未命名'), 'success');
+}
+// alias
+const setActiveLLM = setLLMActive;
+
+async function deleteLLMConfig(idx) {
+  if(llmFullConfig.configs.length <= 1) return toast('至少保留一个配置', 'warn');
+  llmFullConfig.configs.splice(idx, 1);
+  if(llmFullConfig.active_idx >= llmFullConfig.configs.length) llmFullConfig.active_idx = 0;
+  await fetch(API+'/api/llm-config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(llmFullConfig)});
+  renderLLMList();
+  document.getElementById('llm-editor').style.display = 'none';
+  toast('已删除','success');
+}
+
+async function quickTestLLM(idx) {
+  const c = llmFullConfig.configs[idx];
+  if(!c) return;
+  toast('测试连接中...','info');
+  try {
+    const r = await fetch(API+'/api/llm-test', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(c)});
+    const data = await r.json();
+    if(data.ok) toast(`${c.name} 连接成功`, 'success');
+    else toast(`${c.name} 连接失败: ${data.error}`, 'error');
+  } catch(e) { toast('测试失败: '+e.message, 'error'); }
+}
+
+async function testLLM() {
+  const btn = document.getElementById('btn-test'); btn.disabled=true; btn.textContent='测试中...';
+  try {
+    const cfg = {
+      name: document.getElementById('cfg-name').value,
+      provider: document.getElementById('cfg-provider').value,
+      model: document.getElementById('cfg-model').value,
+      api_key: document.getElementById('cfg-key').value,
+      base_url: document.getElementById('cfg-base').value,
+    };
+    // If key is empty, try to use stored key
+    if(!cfg.api_key) {
+      const idx = parseInt(document.getElementById('cfg-edit-idx').value);
+      if(idx >= 0 && llmFullConfig.configs[idx]) {
+        cfg.api_key = llmFullConfig.configs[idx].api_key || '';
+      }
+    }
+    const r = await fetch(API+'/api/llm-test', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)});
+    const data = await r.json();
+    if(data.ok) toast('连接成功: '+data.response, 'success');
+    else toast('连接失败: '+data.error, 'error');
+  } catch(e) { toast('测试失败: '+e, 'error'); }
+  btn.disabled=false; btn.textContent='测试连接';
+}
+
+async function saveLLM() {
+  const idx = parseInt(document.getElementById('cfg-edit-idx').value);
+  const name = document.getElementById('cfg-name').value.trim();
+  if(!name) return toast('请输入配置名称', 'warn');
+  const entry = {
+    name,
+    provider: document.getElementById('cfg-provider').value,
+    model: document.getElementById('cfg-model').value.trim(),
+    api_key: document.getElementById('cfg-key').value,
+    base_url: document.getElementById('cfg-base').value.trim(),
+  };
+  if(idx >= 0) {
+    // Editing existing
+    if(!entry.api_key) entry.api_key = llmFullConfig.configs[idx].api_key || '';
+    llmFullConfig.configs[idx] = entry;
+  } else {
+    if(!entry.api_key) return toast('请输入 API Key', 'warn');
+    llmFullConfig.configs.push(entry);
+    llmFullConfig.active_idx = llmFullConfig.configs.length - 1;
+  }
+  await fetch(API+'/api/llm-config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(llmFullConfig)});
+  renderLLMList();
+  document.getElementById('llm-editor').style.display = 'none';
+  toast('配置已保存','success');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Recorder
+// ═══════════════════════════════════════════════════════════════
+function renderRecorder(body) {
+  const hasCloned = clonedSet.size > 0;
+  body.innerHTML = `<div style="margin-bottom:12px"><button onclick="goToEditing()">← 返回编辑字幕</button></div><div class="tabs"><div class="tab ${hasCloned?'':'active'}" onclick="showRecTab('clone')" id="tab-clone">音色克隆</div><div class="tab ${hasCloned?'active':''}" onclick="showRecTab('manual')" id="tab-manual">逐句录音</div></div><div id="rec-clone" class="${hasCloned?'hidden':''}">${renderCloneRec()}</div><div id="rec-manual" class="${hasCloned?'':'hidden'}">${renderManualRec()}</div>`;
+}
+function renderManualRec() {
+  const idx=curIdx, total=sentences.length;
+  const done = Object.keys(selectedSource).filter(k => parseInt(k) <= total).length;
+  let html = `<div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center"><span id="rec-progress-bar">已确认 <span style="color:#2a9d3f;font-weight:500">${done}</span> / ${total} 句</span><div style="display:flex;gap:8px"><button onclick="startAutoPlay()" style="font-size:12px;padding:6px 12px">▶ 自动播放</button><button onclick="stopAutoPlay()" style="font-size:12px;padding:6px 12px">⏸ 暂停</button><button class="primary" onclick="startCompose()" ${done<total?'disabled':''}>🎬 生成视频</button></div></div>`;
+  html += `<div class="rec-layout"><div class="rec-list" id="rec-list">`;
+  for(let i=0;i<total;i++) {
+    const confirmed = selectedSource[i+1];
+    const badge = confirmed ? '<span class="rec-badge manual">✓</span>' : '';
+    html += `<div class="rec-item ${i===idx?'active':''}" onclick="selectRecItem(${i})"><span class="rec-idx">${i+1}</span><span class="rec-text">${escHtml(sentences[i]?.text||'')}</span>${badge}</div>`;
+  }
+  html += `</div><div class="rec-detail" id="rec-detail">${renderRecDetail()}</div></div>`;
+  return html;
+}
+function renderRecDetail() {
+  const i=curIdx, idx=i+1, total=sentences.length;
+  if(i<0||i>=total) return '<p style="color:#888">请选择一句字幕</p>';
+  const rec=recordedSet.has(idx), hasClone=clonedSet.has(idx);
+  let html = `<div style="margin-bottom:8px;color:#888;font-size:12px">第 ${idx} / ${total} 句</div>`;
+  html += `<div class="sent-box" style="font-size:20px;min-height:80px;margin-bottom:16px">${escHtml(sentences[i]?.text||'')}</div>`;
+    if(hasClone) {
+    const useManual = rec, useClone = !rec;
+    html += `<div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px">`;
+    html += `<div onclick="selectSource('clone')" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useClone?'border:2px solid #2a9d3f':''}"><span style="font-weight:500">🤖 克隆</span>
+        <button onclick="event.stopPropagation();playCloneAudio()" style="font-size:12px;padding:4px 10px">▶ 试听</button>
+        <button onclick="event.stopPropagation();regenClone()" style="font-size:12px;padding:4px 10px">🔄 重新生成</button>
+        </div>`;
+    html += `<div onclick="selectSource('manual')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useManual?'border:2px solid #2a9d3f':''}"><span style="font-weight:500">🎙 手动</span>
+        <button onclick="event.stopPropagation();playRec()" style="font-size:12px;padding:4px 10px" ${rec?'':'disabled'}>▶ 试听</button>
+        <button onclick="event.stopPropagation();toggleRec()" class="primary" id="rec-btn" style="font-size:12px;padding:4px 10px">🎙 录音</button>
+        ${rec?'<button onclick="event.stopPropagation();deleteManual()" style="font-size:12px;padding:4px 10px;color:#d9534f;border-color:#d9534f">删除</button>':''}
+        </div></div>`;
+  } else {
+    html += `<div style="display:flex;gap:8px;margin-bottom:8px"><button class="primary" id="rec-btn" onclick="toggleRec()">🎙 开始录音 (空格)</button><button onclick="playRec()" ${rec?'':'disabled'}>▶ 试听</button></div>`;
+    html += `<div class="status ${rec?'ok':''}">${rec?'✓ 已录制':'未录制'}</div>`;
+  }
+  html += `<audio id="player" controls style="width:100%;margin-top:12px;display:none" onended="onPlayerEnded()"></audio>`;
+  return html;
+}
+function selectRecItem(i) {
+  autoPlayPaused = true;
+  const p = document.getElementById('player'); if(p) p.pause();
+  curIdx = i;
+  document.querySelectorAll('.rec-list .rec-item').forEach((el,j) => el.classList.toggle('active', j===i));
+  document.getElementById('rec-detail').innerHTML = renderRecDetail();
+  scrollToActive();
+}
+function scrollToActive() {
+  const el = document.querySelector('.rec-list .rec-item.active');
+  if(el) el.scrollIntoView({block:'nearest', behavior:'smooth'});
+}
+let autoPlayPaused = false, rejectedSet = new Set(), selectedSource = {};  // {idx: 'clone'|'manual'}
+function onPlayerEnded() {
+  if(autoPlayPaused || curIdx >= sentences.length-1) return;
+  // Mark as accepted in UI only (actual file sync happens at compose time)
+  if(clonedSet.has(curIdx+1)) {
+    selectedSource[curIdx+1] = 'clone';
+    recordedSet.add(curIdx+1);
+    updateRecListItem(curIdx);
+    updateRecProgress();
+  }
+  showCountdown(3);
+}
+function showCountdown(n) {
+  const detail = document.getElementById('rec-detail');
+  if(!detail || autoPlayPaused) { return; }
+  if(n <= 0) {
+    // Flash checkmark then go next
+    detail.innerHTML = `<div style="text-align:center;padding:40px 20px"><div style="font-size:48px;color:#2a9d3f;animation:countPulse .5s ease">✓</div><p style="margin-top:8px;color:#2a9d3f;font-size:14px">已确认</p></div>`;
+    setTimeout(() => {
+      if(autoPlayPaused) return;
+      selectRecItem(curIdx+1);
+      autoPlayPaused = false;
+      playCurrentClone();
+    }, 600);
+    return;
+  }
+  detail.innerHTML = `<div style="text-align:center;padding:40px 20px"><div style="font-size:64px;font-weight:700;color:#4a9eff;animation:countPulse 1s ease">${n}</div><p style="margin-top:8px;color:#2a9d3f;font-size:14px">✓ 自动接受</p><p style="margin-top:4px;color:#888;font-size:13px">下一句即将播放...</p><button onclick="stopAutoPlay()" style="margin-top:12px">⏸ 暂停</button></div>`;
+  setTimeout(() => showCountdown(n-1), 1000);
+}
+function updateRecListItem(i) {
+  const items = document.querySelectorAll('.rec-list .rec-item');
+  if(!items[i]) return;
+  const confirmed = selectedSource[i+1];
+  const badge = confirmed ? '<span class="rec-badge manual">✓</span>' : '';
+  const badgeEl = items[i].querySelector('.rec-badge');
+  if(badgeEl) badgeEl.outerHTML = badge;
+  else if(badge) items[i].insertAdjacentHTML('beforeend', badge);
+  else if(badgeEl) badgeEl.remove();
+}
+function updateRecProgress() {
+  const total = sentences.length;
+  const done = Object.keys(selectedSource).filter(k => parseInt(k) <= total).length;
+  const bar = document.getElementById('rec-progress-bar');
+  if(bar) bar.innerHTML = `已确认 <span style="color:#2a9d3f;font-weight:500">${done}</span> / ${total} 句`;
+}
+function startAutoPlay() {
+  autoPlayPaused = false;
+  playCurrentClone();
+  toast('开始自动播放','info');
+}
+function stopAutoPlay() {
+  autoPlayPaused = true;
+  const p = document.getElementById('player'); if(p) { p.pause(); }
+  toast('已暂停播放','info');
+}
+function playCurrentClone() {
+  if(curIdx >= sentences.length) return;
+  const p = document.getElementById('player'); if(!p) return;
+  // Manual recording takes priority
+  if(recordedSet.has(curIdx+1)) { p.src = API+'/api/project/'+curProj+'/record/'+(curIdx+1)+'?t='+Date.now(); }
+  else if(clonedSet.has(curIdx+1)) { p.src = API+'/api/project/'+curProj+'/clone-audio/'+(curIdx+1)+'?t='+Date.now(); }
+  else return;
+  p.style.display='block'; p.play();
+}
+function renderCloneRec() {
+  const hasCloned = clonedSet.size > 0;
+  let html = `<div class="card" style="padding:20px"><p style="margin-bottom:12px">录制一段 10-30 秒语音样本，系统将克隆音色自动生成所有句子。</p>
+    <label style="display:block;margin:12px 0 4px;font-weight:500">样本文字</label><textarea id="clone-prompt" style="width:100%;height:80px;resize:vertical;font-family:inherit;font-size:14px;padding:8px;border:1px solid #ccc;border-radius:6px">大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。</textarea>
+    <label style="display:block;margin:12px 0 4px;font-weight:500">录制或上传样本</label>
+    <div style="display:flex;gap:8px;align-items:center"><button id="clone-rec-btn" onclick="toggleCloneRec()">🎙 录制</button><button onclick="document.getElementById('clone-file').click()">📁 上传</button><input type="file" id="clone-file" accept="audio/*" style="display:none" onchange="onCloneFile(event)"><span id="clone-status" style="color:#888;font-size:13px"></span></div>
+    <audio id="clone-player" controls style="width:100%;margin-top:8px;display:none"></audio>
+    <div style="margin-top:16px"><button class="primary" id="btn-clone-gen" onclick="startClone()" disabled>🎙 一键生成全部</button></div>`;
+  if(hasCloned) {
+    html += `<div style="margin-top:16px;padding-top:16px;border-top:1px solid #eee"><p style="margin-bottom:8px;color:#2a9d3f;font-weight:500">✓ 已生成 ${clonedSet.size} 句克隆音频</p><p style="color:#888;font-size:13px;margin-bottom:12px">可切换到「逐句录音」页面试听并逐句选择，或一键全部采用：</p><button style="background:#2a9d3f;color:#fff;border-color:#2a9d3f" onclick="acceptAllClones()">✓ 一键全部采用克隆音频</button></div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+function showRecTab(tab) { document.getElementById('tab-clone').classList.toggle('active',tab==='clone');document.getElementById('tab-manual').classList.toggle('active',tab==='manual');document.getElementById('rec-clone').classList.toggle('hidden',tab!=='clone');document.getElementById('rec-manual').classList.toggle('hidden',tab!=='manual'); }
+let cloneChunks=[], cloneRecording=false;
+async function toggleCloneRec() {
+  if(!cloneRecording) {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    const rec = new MediaRecorder(stream, {mimeType:'audio/webm;codecs=opus'});
+    cloneChunks = [];
+    rec.ondataavailable = e => { if(e.data.size>0) cloneChunks.push(e.data); };
+    rec.onstop = () => { cloneRecording=false; document.getElementById('clone-rec-btn').textContent='🎙 录制'; document.getElementById('clone-rec-btn').classList.remove('recording'); const blob=new Blob(cloneChunks,{type:'audio/webm'}); const p=document.getElementById('clone-player'); p.src=URL.createObjectURL(blob); p.style.display='block'; document.getElementById('clone-status').textContent='✓ 已录制'; document.getElementById('btn-clone-gen').disabled=false; window._cloneBlob=blob; };
+    rec.start(); cloneRecording=true; document.getElementById('clone-rec-btn').textContent='⏹ 停止'; document.getElementById('clone-rec-btn').classList.add('recording'); window._cloneRec=rec;
+  } else { window._cloneRec.stop(); }
+}
+function onCloneFile(e) { const f=e.target.files[0]; if(!f) return; window._cloneBlob=f; const p=document.getElementById('clone-player'); p.src=URL.createObjectURL(f); p.style.display='block'; document.getElementById('clone-status').textContent='✓ '+f.name; document.getElementById('btn-clone-gen').disabled=false; }
+async function startClone() { const b=window._cloneBlob; if(!b) { toast('请先录制或上传样本', 'warn'); return; } const fd=new FormData(); fd.append('sample',b,'voice_sample.wav'); fd.append('prompt_text',document.getElementById('clone-prompt')?.value||''); await fetch(API+'/api/project/'+curProj+'/voice-clone',{method:'POST',body:fd}); await refreshWork(); }
+async function acceptAllClones() { await fetch(API+'/api/project/'+curProj+'/accept-all-clones',{method:'POST'}); toast('已全部采用克隆音频','success'); await refreshWork(); }
+
+function recPrev() { if(curIdx>0){curIdx--;renderRecorder(document.getElementById('work-body'));} }
+function recNext() { if(curIdx<sentences.length-1){curIdx++;renderRecorder(document.getElementById('work-body'));} }
+function recGoto() { const i=parseInt(document.getElementById('goto-i').value); if(i>=1&&i<=sentences.length){curIdx=i-1;renderRecorder(document.getElementById('work-body'));} }
+function recNextUnrec() { for(let i=curIdx+1;i<sentences.length;i++){if(!recordedSet.has(i+1)){curIdx=i;renderRecorder(document.getElementById('work-body'));return;}} }
+async function toggleRec() { if(!mediaRecorder) return; if(!isRecording){chunks=[];mediaRecorder.start();isRecording=true;document.getElementById('rec-btn').textContent='⏹ 停止';document.getElementById('rec-btn').classList.add('recording');}else{mediaRecorder.stop();isRecording=false;document.getElementById('rec-btn').textContent='🎙 开始录音';document.getElementById('rec-btn').classList.remove('recording');} }
+async function onRecStop() { const blob=new Blob(chunks,{type:'audio/webm'}); const fd=new FormData(); fd.append('audio',blob,`s_${(curIdx+1).toString().padStart(3,'0')}.webm`); const r=await fetch(API+'/api/project/'+curProj+'/record/'+(curIdx+1),{method:'POST',body:fd}); if(r.ok){recordedSet.add(curIdx+1);rejectedSet.delete(curIdx+1);selectedSource[curIdx+1]='manual';updateRecListItem(curIdx);document.getElementById('rec-detail').innerHTML=renderRecDetail();const p=document.getElementById('player');p.src=URL.createObjectURL(blob);p.style.display='block';updateRecProgress();} }
+function playRec() { autoPlayPaused=true; const p=document.getElementById('player'); p.src=API+'/api/project/'+curProj+'/record/'+(curIdx+1)+'?t='+Date.now(); p.style.display='block'; p.play(); }
+function playCloneAudio() { autoPlayPaused=true; const p=document.getElementById('player'); p.src=API+'/api/project/'+curProj+'/clone-audio/'+(curIdx+1)+'?t='+Date.now(); p.style.display='block'; p.play(); }
+async function acceptClone() { await fetch(API+'/api/project/'+curProj+'/accept-clone/'+(curIdx+1),{method:'POST'}); recordedSet.add(curIdx+1); rejectedSet.delete(curIdx+1); updateRecListItem(curIdx); document.getElementById('rec-detail').innerHTML=renderRecDetail(); updateRecProgress(); }
+async function selectSource(src) {
+  selectedSource[curIdx+1] = src;
+  document.getElementById('rec-detail').innerHTML=renderRecDetail();
+}
+async function deleteManual() {
+  await fetch(API+'/api/project/'+curProj+'/record/'+(curIdx+1),{method:'DELETE'});
+  recordedSet.delete(curIdx+1);
+  if(selectedSource[curIdx+1]==='manual') delete selectedSource[curIdx+1];
+  updateRecListItem(curIdx); updateRecProgress();
+  document.getElementById('rec-detail').innerHTML=renderRecDetail();
+  toast('已删除','success');
+}
+let _regening = false;
+	async function regenClone() {
+	  if(_regening) return;
+	  _regening = true;
+	  const regenIdx = curIdx;
+	  const detail = document.getElementById('rec-detail');
+	  if(curIdx === regenIdx) {
+	    detail.innerHTML = `<div style="text-align:center;padding:40px 20px"><div style="font-size:28px;animation:spin 1s linear infinite;display:inline-block">🔄</div><p style="margin-top:12px;color:#888">正在重新生成克隆音频...</p></div>`;
+	  }
+	  try {
+	    const r = await fetch(API+'/api/project/'+curProj+'/regenerate-clone/'+(regenIdx+1),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+	    const data = await safeJSON(r);
+	    if(data.error){toast(data.error,'error');} else {
+	      clonedSet.add(regenIdx+1);
+	      toast(`第 ${regenIdx+1} 句重新生成完成`,'success');
+	      // Update UI only if still on the same sentence
+	      if(curIdx === regenIdx) {
+	        detail.innerHTML=renderRecDetail();
+	      }
+	      updateRecListItem(regenIdx);
+	    }
+	  } catch(e) { toast('生成失败: '+e.message,'error'); if(curIdx===regenIdx) detail.innerHTML=renderRecDetail(); }
+	  finally { _regening = false; }
+	}
+async function rejectClone() { await fetch(API+'/api/project/'+curProj+'/reject-clone/'+(curIdx+1),{method:'POST'}); recordedSet.delete(curIdx+1); rejectedSet.add(curIdx+1); updateRecListItem(curIdx); document.getElementById('rec-detail').innerHTML=renderRecDetail(); updateRecProgress(); toast('已拒绝使用克隆音频','success'); }
+async function startCompose() {
+  // Sync source selections to backend before composing
+  for(let i=0;i<sentences.length;i++) {
+    const src = selectedSource[i+1];
+    if(src === 'clone' && clonedSet.has(i+1)) {
+      await fetch(API+'/api/project/'+curProj+'/accept-clone/'+(i+1),{method:'POST'});
+    }
+  }
+  await fetch(API+'/api/project/'+curProj+'/compose',{method:'POST'}); await refreshWork();
+}
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if(e.target.tagName==='TEXTAREA'||e.target.tagName==='INPUT') return;
+  if(!curProj||!sentences.length) return;
+  const st = document.querySelector('.stage-bar .step.active')?.textContent;
+  if(st==='录音') { if(e.code==='Space'){e.preventDefault();toggleRec();} else if(e.code==='Enter'){e.preventDefault();recNext();} else if(e.code==='ArrowLeft'){e.preventDefault();recPrev();} else if(e.code==='ArrowRight'){e.preventDefault();recNext();} }
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// Image-to-Video — Projects
+// ═══════════════════════════════════════════════════════════════
+async function refreshI2VProjects() {
+  i2vProjects = await (await fetch(API+'/api/img2vid')).json();
+  document.getElementById('i2v-list').innerHTML = i2vProjects.map(p =>
+    `<div class="proj${curI2V===p.name?' active':''}" onclick="openI2V('${p.name}')">${p.name} <span style="float:right;font-size:11px">${p.stage==='done'?'✓':''}</span></div>`
+  ).join('');
+}
+function showI2VNew() { curI2V=null; curProj=null; refreshProjects(); refreshI2VProjects(); show('v-i2v-new'); }
+
+const i2vDz = document.getElementById('i2v-drop-zone');
+i2vDz.ondragover = e => { e.preventDefault(); i2vDz.classList.add('dragover'); };
+i2vDz.ondragleave = () => i2vDz.classList.remove('dragover');
+i2vDz.ondrop = e => { e.preventDefault(); i2vDz.classList.remove('dragover'); addI2VFiles(e.dataTransfer.files); };
+function onI2VFileSelect(e) { addI2VFiles(e.target.files); e.target.value=''; }
+
+function addI2VFiles(files) {
+  const newFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+  if (i2vFiles.length + newFiles.length > 60) {
+    toast('最多支持 60 张图片', 'warn'); newFiles.length = 60 - i2vFiles.length;
+  }
+  i2vFiles = i2vFiles.concat(newFiles);
+  renderI2VUploadPreview();
+}
+function clearI2VFiles() { i2vFiles = []; renderI2VUploadPreview(); }
+function removeI2VFile(idx) { i2vFiles.splice(idx, 1); renderI2VUploadPreview(); }
+
+let i2vDragSrcIdx = null;
+function renderI2VUploadPreview() {
+  const container = document.getElementById('i2v-upload-preview');
+  const grid = document.getElementById('i2v-preview-grid');
+  const countEl = document.getElementById('i2v-file-count');
+  if (!i2vFiles.length) { container.classList.add('hidden'); return; }
+  container.classList.remove('hidden');
+  countEl.textContent = `${i2vFiles.length} / 60 张图片`;
+  grid.innerHTML = i2vFiles.map((f, i) => {
+    const url = URL.createObjectURL(f);
+    return `<div class="img-card" draggable="true" data-i="${i}"
+      ondragstart="i2vPreviewDragStart(event,${i})" ondragover="i2vPreviewDragOver(event)"
+      ondragenter="i2vPreviewDragEnter(event)" ondragleave="i2vPreviewDragLeave(event)"
+      ondrop="i2vPreviewDrop(event,${i})" ondragend="i2vPreviewDragEnd(event)">
+      <div class="img-idx">${i+1}</div>
+      <button class="img-remove" onclick="removeI2VFile(${i})">×</button>
+      <img src="${url}" alt="">
+      <div class="img-name">${escHtml(f.name)}</div>
+    </div>`;
+  }).join('');
+}
+function i2vPreviewDragStart(e, idx) { i2vDragSrcIdx = idx; e.dataTransfer.effectAllowed='move'; e.target.classList.add('dragging'); }
+function i2vPreviewDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect='move'; }
+function i2vPreviewDragEnter(e) { e.preventDefault(); const c=e.target.closest('.img-card'); if(c) c.classList.add('drag-over'); }
+function i2vPreviewDragLeave(e) { const c=e.target.closest('.img-card'); if(c) c.classList.remove('drag-over'); }
+function i2vPreviewDrop(e, targetIdx) {
+  e.preventDefault(); e.stopPropagation();
+  if (i2vDragSrcIdx === null || i2vDragSrcIdx === targetIdx) return;
+  const [moved] = i2vFiles.splice(i2vDragSrcIdx, 1);
+  i2vFiles.splice(targetIdx, 0, moved);
+  i2vDragSrcIdx = null;
+  renderI2VUploadPreview();
+}
+function i2vPreviewDragEnd(e) {
+  document.querySelectorAll('.img-card').forEach(c => { c.classList.remove('dragging','drag-over'); });
+  i2vDragSrcIdx = null;
+}
+
+async function submitI2VNew() {
+  const name = document.getElementById('i2v-name').value.trim();
+  if(!name) return toast('请输入项目名', 'warn');
+  if(!i2vFiles.length) return toast('请上传至少一张图片', 'warn');
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('theme', document.getElementById('i2v-theme').value);
+  i2vFiles.forEach((f,i) => fd.append(`image_${i}`, f));
+  document.getElementById('btn-i2v-create').disabled = true;
+  document.getElementById('btn-i2v-create').textContent = '上传中...';
+  await fetch(API+'/api/img2vid', {method:'POST', body:fd});
+  document.getElementById('btn-i2v-create').disabled = false;
+  document.getElementById('btn-i2v-create').textContent = '创建项目并AI分析';
+  const theme = document.getElementById('i2v-theme').value;
+  document.getElementById('i2v-name').value = '';
+  document.getElementById('i2v-theme').value = '';
+  i2vFiles = [];
+  renderI2VUploadPreview();
+  openI2V(name);
+  // Auto-trigger analysis after opening
+  await fetch(API+'/api/img2vid/'+name+'/analyze', {method:'POST'});
+  await refreshI2VWork();
+}
+
+async function openI2V(name) {
+  curI2V = name; curProj = null;
+  refreshProjects(); refreshI2VProjects();
+  show('v-i2v-work');
+  document.getElementById('i2v-title').textContent = name;
+  await refreshI2VWork(); startI2VPoll();
+}
+
+async function deleteCurProject() {
+  if(!curProj) return;
+  const st = await (await fetch(API+'/api/project/'+curProj)).json();
+  const busy = ['cloning','composing','processing'].includes(st.stage);
+  if(busy) {
+    const ok = await showConfirm('警告：AI 任务运行中', `项目「${curProj}」正在${st.stage==='cloning'?'音色克隆':st.stage==='composing'?'视频合成':'转写处理'}中！\n\n删除将强制中断 AI 任务，所有已生成的数据将丢失。\n\n确定要删除吗？`);
+    if(!ok) return;
+  } else {
+    if(!await showConfirm('删除项目', `确定删除项目「${curProj}」？\n\n将删除该项目所有文件（视频、字幕、录音等），此操作不可撤销。`)) return;
+  }
+  await fetch(API+'/api/project/'+curProj, {method:'DELETE'});
+  curProj = null;
+  show('v-empty'); refreshProjects();
+}
+
+async function resetProject() {
+  if(!curProj) return;
+  const st = await (await fetch(API+'/api/project/'+curProj)).json();
+  const busy = ['cloning','composing','processing'].includes(st.stage);
+  if(busy) {
+    const ok = await showConfirm('警告：AI 任务运行中', `项目「${curProj}」正在${st.stage==='cloning'?'音色克隆':st.stage==='composing'?'视频合成':'转写处理'}中！\n\n清空数据将强制中断 AI 任务，所有进度将丢失。\n\n确定要清空吗？`);
+    if(!ok) return;
+  } else {
+    if(!await showConfirm('清除数据', `确定清空项目「${curProj}」的所有数据？\n\n将删除视频、字幕、录音等，保留空项目壳。此操作不可撤销。`)) return;
+  }
+  await fetch(API+'/api/project/'+curProj+'/reset', {method:'POST'});
+  sentences = []; recordedSet = new Set(); clonedSet = new Set(); sentencesBackup = null;
+  sentenceVersions = {}; activeVersion = 'original';
+  await refreshWork();
+}
+
+async function deleteCurI2V() {
+  if(!curI2V) return;
+  const st = await (await fetch(API+'/api/img2vid/'+curI2V)).json();
+  const busy = ['analyzing','generating'].includes(st.stage);
+  if(busy) {
+    const ok = await showConfirm('警告：AI 任务运行中', `项目「${curI2V}」正在${st.stage==='analyzing'?'AI 分析':'视频生成'}中！\n\n删除将强制中断 AI 任务，所有数据将丢失。\n\n确定要删除吗？`);
+    if(!ok) return;
+  } else {
+    if(!await showConfirm('删除项目', `确定删除项目「${curI2V}」？\n\n将删除该项目所有文件（图片、音频、视频等），此操作不可撤销。`)) return;
+  }
+  clearInterval(i2vPollTimer);
+  await fetch(API+'/api/img2vid/'+curI2V, {method:'DELETE'});
+  curI2V = null;
+  show('v-empty'); refreshI2VProjects();
+}
+
+async function refreshI2VWork() {
+  if(!curI2V) return;
+  const st = await (await fetch(API+'/api/img2vid/'+curI2V)).json();
+  renderI2VStages(st.stage);
+  const body = document.getElementById('i2v-body');
+  if(st.stage === 'uploading') {
+    // Show images + trigger analyze
+    i2vImages = await (await fetch(API+'/api/img2vid/'+curI2V+'/images')).json();
+    renderI2VImages(body, st);
+  } else if(st.stage === 'analyzing') {
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">✨</div><p style="margin-top:12px">${st.msg||'AI 识别图片中...'}</p></div>`;
+  } else if(st.stage === 'narration_ready') {
+    i2vNarration = await (await fetch(API+'/api/img2vid/'+curI2V+'/narration')).json();
+    renderI2VNarration(body, st);
+  } else if(st.stage === 'generating') {
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎬</div><p style="margin-top:12px">${st.msg||'生成视频中...'}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:50%"></div></div></div>`;
+  } else if(st.stage === 'done') {
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px">✅</div><h3 style="margin:12px 0">视频已生成</h3><a href="${API}/api/img2vid/${curI2V}/download" class="primary" style="display:inline-block;padding:12px 32px;text-decoration:none;border-radius:8px;background:#6c5ce7;color:#fff">⬇ 下载视频 (MP4)</a><p style="margin-top:16px"><button onclick="curI2V=null;show('v-empty')">返回</button></p></div>`;
+  } else if(st.stage === 'error') {
+    body.innerHTML = `<div class="card" style="padding:24px;color:#d9534f"><b>错误：</b><br>${(st.msg||'').replace(/\n/g,'<br>')}</div>`;
+  }
+}
+
+function renderI2VStages(stage) {
+  const steps = [{k:'uploading',l:'图片'},{k:'analyzing',l:'AI分析'},{k:'narration_ready',l:'旁白'},{k:'generating',l:'生成'}];
+  let hit = false;
+  document.getElementById('i2v-stages').innerHTML = steps.map(s => {
+    const cls = stage===s.k?'active':(hit?'':'done'); if(stage===s.k) hit=true;
+    return `<div class="step ${cls}">${s.l}</div>`;
+  }).join('');
+}
+
+function renderI2VImages(body, st) {
+  let html = `<p style="margin-bottom:12px">${i2vImages.length} 张图片 · 拖拽图片可调整顺序，调整后点击分析</p>`;
+  html += `<div class="img-grid" id="i2v-project-grid">`;
+  i2vImages.forEach((img, i) => {
+    html += `<div class="img-card" draggable="true" data-i="${i}"
+      ondragstart="i2vProjDragStart(event,${i})" ondragover="i2vProjDragOver(event)"
+      ondragenter="i2vProjDragEnter(event)" ondragleave="i2vProjDragLeave(event)"
+      ondrop="i2vProjDrop(event,${i})" ondragend="i2vProjDragEnd(event)">
+      <div class="img-idx">${i+1}</div>
+      <img src="${API}${img.url}" alt="图片${i+1}">
+      <div class="img-ctrl">
+        <button onclick="i2vMove(${i},-1)" ${i===0?'disabled':''}>↑</button>
+        <button onclick="i2vMove(${i},1)" ${i===i2vImages.length-1?'disabled':''}>↓</button>
+      </div>
+    </div>`;
+  });
+  html += `</div>`;
+  html += `<div style="margin-top:16px"><button class="primary" onclick="startI2VAnalyze()">✨ 开始AI分析并生成旁白</button></div>`;
+  body.innerHTML = html;
+}
+
+let i2vProjDragSrc = null;
+function i2vProjDragStart(e, idx) { i2vProjDragSrc = idx; e.dataTransfer.effectAllowed='move'; e.target.classList.add('dragging'); }
+function i2vProjDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect='move'; }
+function i2vProjDragEnter(e) { e.preventDefault(); const c=e.target.closest('.img-card'); if(c) c.classList.add('drag-over'); }
+function i2vProjDragLeave(e) { const c=e.target.closest('.img-card'); if(c) c.classList.remove('drag-over'); }
+async function i2vProjDrop(e, targetIdx) {
+  e.preventDefault(); e.stopPropagation();
+  if (i2vProjDragSrc === null || i2vProjDragSrc === targetIdx) return;
+  const [moved] = i2vImages.splice(i2vProjDragSrc, 1);
+  i2vImages.splice(targetIdx, 0, moved);
+  i2vProjDragSrc = null;
+  await fetch(API+'/api/img2vid/'+curI2V+'/reorder', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({order:i2vImages.map(i=>i.file)})});
+  renderI2VImages(document.getElementById('i2v-body'), {});
+}
+function i2vProjDragEnd(e) {
+  document.querySelectorAll('.img-card').forEach(c => c.classList.remove('dragging','drag-over'));
+  i2vProjDragSrc = null;
+}
+
+async function i2vMove(idx, dir) {
+  const newIdx = idx + dir;
+  if(newIdx < 0 || newIdx >= i2vImages.length) return;
+  // Swap
+  [i2vImages[idx], i2vImages[newIdx]] = [i2vImages[newIdx], i2vImages[idx]];
+  // Tell backend new order
+  await fetch(API+'/api/img2vid/'+curI2V+'/reorder', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({order: i2vImages.map(i=>i.file)})});
+  renderI2VImages(document.getElementById('i2v-body'), {});
+}
+
+async function startI2VAnalyze() {
+  await fetch(API+'/api/img2vid/'+curI2V+'/analyze', {method:'POST'});
+  await refreshI2VWork();
+}
+
+function renderI2VNarration(body, st) {
+  let html = `<p style="margin-bottom:12px">AI 生成的旁白如下，可编辑每段文字。确认后生成视频。</p>`;
+  html += i2vNarration.map((n, i) =>
+    `<div style="margin-bottom:12px;padding:12px;background:#fafafa;border-radius:8px;border:1px solid #eee">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="background:#6c5ce7;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">图 ${n.image_idx+1}</span>
+      </div>
+      <textarea class="sent-row" data-i="${i}" rows="2" oninput="autoGrow(this)" style="width:100%">${escHtml(n.narration)}</textarea>
+    </div>`
+  ).join('');
+
+  html += `<div style="margin-top:20px;padding-top:20px;border-top:1px solid #eee">
+    <p style="font-weight:500;margin-bottom:12px">声纹设置</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <button id="i2v-voice-btn" onclick="toggleI2VVoice()">🎙 录制声纹</button>
+      <button onclick="document.getElementById('i2v-voice-file').click()">📁 上传声纹</button>
+      <input type="file" id="i2v-voice-file" accept="audio/*" style="display:none" onchange="onI2VVoiceFile(event)">
+      <span id="i2v-voice-status" style="color:#888;font-size:13px">未录制将使用默认声纹</span>
+    </div>
+    <audio id="i2v-voice-player" controls style="width:100%;margin:8px 0;display:none"></audio>
+  </div>`;
+
+  html += `<div style="margin-top:16px;display:flex;gap:8px">
+    <button class="primary" onclick="generateI2V()" style="background:#6c5ce7;border-color:#6c5ce7">🎬 生成视频</button>
+  </div>`;
+  body.innerHTML = html;
+  body.querySelectorAll('textarea').forEach(autoGrow);
+}
+
+let i2vVoiceRecording = false, i2vVoiceChunks = [], i2vVoiceBlob = null;
+async function toggleI2VVoice() {
+  if(!i2vVoiceRecording) {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    const rec = new MediaRecorder(stream, {mimeType:'audio/webm;codecs=opus'});
+    i2vVoiceChunks = [];
+    rec.ondataavailable = e => { if(e.data.size>0) i2vVoiceChunks.push(e.data); };
+    rec.onstop = () => {
+      i2vVoiceRecording = false;
+      document.getElementById('i2v-voice-btn').textContent = '🎙 录制声纹';
+      document.getElementById('i2v-voice-btn').classList.remove('recording');
+      i2vVoiceBlob = new Blob(i2vVoiceChunks, {type:'audio/webm'});
+      const p = document.getElementById('i2v-voice-player');
+      p.src = URL.createObjectURL(i2vVoiceBlob); p.style.display = 'block';
+      document.getElementById('i2v-voice-status').textContent = '已录制';
+      document.getElementById('i2v-voice-status').classList.add('ok');
+    };
+    rec.start(); i2vVoiceRecording = true;
+    document.getElementById('i2v-voice-btn').textContent = '⏹ 停止';
+    document.getElementById('i2v-voice-btn').classList.add('recording');
+    window._i2vRec = rec;
+  } else { window._i2vRec.stop(); }
+}
+function onI2VVoiceFile(e) {
+  const f = e.target.files[0]; if(!f) return;
+  i2vVoiceBlob = f;
+  const p = document.getElementById('i2v-voice-player');
+  p.src = URL.createObjectURL(f); p.style.display = 'block';
+  document.getElementById('i2v-voice-status').textContent = f.name;
+  document.getElementById('i2v-voice-status').classList.add('ok');
+}
+
+async function generateI2V() {
+  // Save edited narration
+  const tas = document.querySelectorAll('.i2v-body textarea, #i2v-body textarea');
+  tas.forEach((ta,i) => { if(i2vNarration[i]) i2vNarration[i].narration = ta.value; });
+  await fetch(API+'/api/img2vid/'+curI2V+'/narration', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(i2vNarration)});
+
+  // Upload voice if recorded
+  if(i2vVoiceBlob) {
+    const fd = new FormData(); fd.append('sample', i2vVoiceBlob, 'voice_sample.wav');
+    await fetch(API+'/api/img2vid/'+curI2V+'/voice-sample', {method:'POST', body:fd});
+  }
+
+  // Start generation
+  await fetch(API+'/api/img2vid/'+curI2V+'/generate', {method:'POST'});
+  await refreshI2VWork();
+}
+
+function startI2VPoll() { clearInterval(i2vPollTimer); i2vPollTimer=setInterval(async()=>{
+  if(!curI2V) return;
+  const st=await(await fetch(API+'/api/img2vid/'+curI2V)).json();
+  if(st.stage==='analyzing'||st.stage==='generating') refreshI2VWork();
+  if(st.stage==='done'||st.stage==='error'||st.stage==='narration_ready'||st.stage==='uploading'){clearInterval(i2vPollTimer);refreshI2VWork();}
+},2000); }
+
+// ═══════════════════════════════════════════════════════════════
+// Tools shared
+// ═══════════════════════════════════════════════════════════════
+function getToolProject(label) {
+  if(curProj) return curProj;
+  const name = prompt(`请输入要${label}的项目名：`);
+  if(!name) return null;
+  if(!projects.includes(name)) { toast('项目不存在：'+name, 'error'); return null; }
+  return name;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Video Format Conversion
+// ═══════════════════════════════════════════════════════════════
+function showConvert() {
+  const sel = getToolProject('格式转换');
+  if(!sel) return;
+  curProj = sel;
+  refreshProjects();
+  document.getElementById('cv-status').textContent = '';
+  document.getElementById('cv-video').src = API + '/api/project/' + curProj + '/video';
+  show('v-convert');
+}
+async function startConvert() {
+  if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
+  const fmt = document.getElementById('cv-format').value;
+  const res = document.getElementById('cv-res').value;
+  lockTask(curProj, 'convert');
+  updateTaskBar('格式转换中...', 30);
+  document.getElementById('cv-status').textContent = '处理中...';
+  try {
+    const r = await fetch(API+'/api/project/'+curProj+'/convert', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({format:fmt, resolution:res})
+    });
+    const data = await safeJSON(r);
+    if(data.error) { toast(data.error, 'error'); unlockTask(); return; }
+    // Poll until done
+    const pollId = setInterval(async()=>{
+      const st = await(await fetch(API+'/api/project/'+curProj)).json();
+      if(st.stage==='done') {
+        clearInterval(pollId);
+        document.getElementById('cv-status').innerHTML = '<span style="color:#2a9d3f">转换完成！</span>';
+        updateTaskBar('完成', 100);
+        setTimeout(()=>unlockTask(), 1500);
+      } else if(st.stage==='error') {
+        clearInterval(pollId);
+        document.getElementById('cv-status').innerHTML = '<span style="color:#d9534f">'+st.msg.split('\\n')[0]+'</span>';
+        unlockTask();
+      }
+    }, 2000);
+  } catch(e) { toast('请求失败: '+e.message, 'error'); unlockTask(); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Video Editor
+// ═══════════════════════════════════════════════════════════════
+function showVEditor() {
+  const sel = getToolProject('视频编辑');
+  if(!sel) return;
+  curProj = sel;
+  refreshProjects();
+  document.getElementById('ve-status').textContent = '';
+  document.getElementById('ve-video').src = API + '/api/project/' + curProj + '/video';
+  show('v-veditor');
+}
+function closeVEditor() { show('v-empty'); }
+function showVETab(tab) {
+  ['delete','insert-video','insert-images','speedup'].forEach(t => {
+    document.getElementById('vet-tab-'+t).classList.toggle('active', t===tab);
+    document.getElementById('vet-'+t).classList.toggle('hidden', t!==tab);
+  });
+}
+
+async function veDelete() {
+  if(isTaskBusy() && !checkTaskConflict(curProj,'ve')) {
+    return toast('请等待另一个任务处理完成后再执行', 'warn');
+  }
+  const ranges = document.getElementById('ve-ranges').value;
+  if(!ranges.trim()) return toast('请输入要删除的时间段', 'warn');
+  lockTask(curProj, 've_delete');
+  updateTaskBar('视频裁剪中...', 30);
+  document.getElementById('ve-status').textContent = '处理中...';
+  try {
+    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/delete', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ranges})
+    });
+    const data = await r.json();
+    if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
+    document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 裁剪完成！原视频已备份为 input_backup.mp4</span>';
+    updateTaskBar('完成', 100);
+    setTimeout(() => unlockTask(), 1500);
+  } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
+}
+
+async function veInsertVideo() {
+  if(isTaskBusy() && !checkTaskConflict(curProj,'ve')) {
+    return toast('请等待另一个任务处理完成后再执行', 'warn');
+  }
+  const pos = parseFloat(document.getElementById('ve-ins-pos').value) || 0;
+  const file = document.getElementById('ve-ins-file').files[0];
+  if(!file) return toast('请选择视频文件', 'warn');
+  lockTask(curProj, 've_insert');
+  updateTaskBar('插入视频中...', 30);
+  document.getElementById('ve-status').textContent = '处理中...';
+  try {
+    const fd = new FormData();
+    fd.append('video', file);
+    fd.append('position', pos);
+    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/insert-video', {method:'POST', body:fd});
+    const data = await r.json();
+    if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
+    document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 插入完成！</span>';
+    updateTaskBar('完成', 100);
+    setTimeout(() => unlockTask(), 1500);
+  } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
+}
+
+async function veInsertImages() {
+  if(isTaskBusy() && !checkTaskConflict(curProj,'ve')) {
+    return toast('请等待另一个任务处理完成后再执行', 'warn');
+  }
+  const pos = parseFloat(document.getElementById('ve-img-pos').value) || 0;
+  const files = document.getElementById('ve-img-files').files;
+  if(!files.length) return toast('请选择图片', 'warn');
+  const subsText = document.getElementById('ve-img-subs').value;
+  const subs = subsText.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(subs.length !== files.length) return toast(`图片数量(${files.length}, 'warn')和字幕行数(${subs.length})不匹配`);
+
+  lockTask(curProj, 've_insert');
+  updateTaskBar('生成图片视频并插入中...', 10);
+  document.getElementById('ve-status').textContent = '处理中，可能需要几分钟...';
+
+  try {
+    const fd = new FormData();
+    fd.append('position', pos);
+    fd.append('subtitles', JSON.stringify(subs));
+    Array.from(files).forEach((f,i) => fd.append(`image_${i}`, f));
+    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/insert-images', {method:'POST', body:fd});
+    const data = await r.json();
+    if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
+    document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 插入完成！</span>';
+    updateTaskBar('完成', 100);
+    setTimeout(() => unlockTask(), 1500);
+  } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
+}
+
+let speedRecBlob = null;
+let speedRecorder = null;
+
+function updateSpeedPreview() {
+  const start = parseFloat(document.getElementById('ve-speed-start').value) || 0;
+  const end = parseFloat(document.getElementById('ve-speed-end').value) || 0;
+  const rate = parseFloat(document.getElementById('ve-speed-rate').value) || 2;
+  if(end > start && rate > 1) {
+    const newDur = ((end - start) / rate).toFixed(1);
+    document.getElementById('ve-speed-preview').textContent = `原片段 ${(end-start).toFixed(1)}s → 变速后 ${newDur}s`;
+  }
+}
+document.getElementById('ve-speed-start').addEventListener('input', updateSpeedPreview);
+document.getElementById('ve-speed-end').addEventListener('input', updateSpeedPreview);
+document.getElementById('ve-speed-rate').addEventListener('change', updateSpeedPreview);
+
+async function veSpeedUp() {
+  if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
+  const start = parseFloat(document.getElementById('ve-speed-start').value);
+  const end = parseFloat(document.getElementById('ve-speed-end').value);
+  const rate = parseFloat(document.getElementById('ve-speed-rate').value);
+  if(isNaN(start)||isNaN(end)||isNaN(rate)) return toast('请填写完整参数', 'warn');
+  if(end <= start) return toast('结束时间需大于起始时间', 'warn');
+  if(rate <= 1) return toast('倍速需大于1', 'warn');
+  lockTask(curProj, 've_delete');
+  updateTaskBar('视频变速处理中...', 30);
+  document.getElementById('ve-status').textContent = '处理中...';
+  try {
+    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/speedup', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({start, end, rate})
+    });
+    const data = await r.json();
+    if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
+    // Poll until done
+    const pollSpeed = setInterval(async()=>{
+      const st = await(await fetch(API+'/api/project/'+curProj)).json();
+      if(st.stage==='editing' && st.msg && st.msg.includes('变速')) {
+        clearInterval(pollSpeed);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 变速完成！请录制新音频</span>';
+        document.getElementById('ve-speed-record').classList.remove('hidden');
+        updateTaskBar('完成', 100);
+        setTimeout(()=>unlockTask(), 1500);
+      } else if(st.stage==='error') {
+        clearInterval(pollSpeed);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg)+'</span>';
+        unlockTask();
+      }
+    }, 2000);
+  } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
+}
+
+async function veSpeedRecord() {
+  const btn = document.getElementById('ve-speed-rec-btn');
+  const status = document.getElementById('ve-speed-rec-status');
+  if(speedRecorder && speedRecorder.state === 'recording') {
+    speedRecorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    speedRecorder = new MediaRecorder(stream);
+    const spChunks = [];
+    speedRecorder.ondataavailable = e => spChunks.push(e.data);
+    speedRecorder.onstop = () => {
+      stream.getTracks().forEach(t=>t.stop());
+      speedRecBlob = new Blob(spChunks, {type:'audio/webm'});
+      const audio = document.getElementById('ve-speed-audio');
+      audio.src = URL.createObjectURL(speedRecBlob);
+      document.getElementById('ve-speed-rec-player').style.display = 'block';
+      btn.textContent = '🎙 重新录音';
+      status.textContent = '录音完成';
+    };
+    speedRecorder.start();
+    btn.textContent = '⏹ 停止录音';
+    status.textContent = '录音中...';
+  } catch(e) { toast('无法录音: '+e.message, 'info'); }
+}
+
+async function veSpeedMerge() {
+  if(!speedRecBlob) return toast('请先录音', 'warn');
+  if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
+  lockTask(curProj, 've_insert');
+  updateTaskBar('合成视频中...', 50);
+  document.getElementById('ve-status').textContent = '合成中...';
+  try {
+    const fd = new FormData();
+    fd.append('audio', speedRecBlob, 'audio.webm');
+    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/speedup-merge', {method:'POST', body:fd});
+    const data = await r.json();
+    if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
+    const pollMerge = setInterval(async()=>{
+      const st = await(await fetch(API+'/api/project/'+curProj)).json();
+      if(st.stage==='editing' && st.msg && st.msg.includes('合成完成')) {
+        clearInterval(pollMerge);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 合成完成！视频已更新</span>';
+        document.getElementById('ve-speed-record').classList.add('hidden');
+        speedRecBlob = null;
+        updateTaskBar('完成', 100);
+        setTimeout(()=>unlockTask(), 1500);
+      } else if(st.stage==='error') {
+        clearInterval(pollMerge);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg)+'</span>';
+        unlockTask();
+      }
+    }, 2000);
+  } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
+}
+// ═══════════════════════════════════════════════════════════════
+function fmtS(s) { if(!s&&s!==0) return '?'; const m=Math.floor(s/60),sec=Math.floor(s%60); return m+':'+(sec<10?'0':'')+sec; }
+function escHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+</script>
+</body>
+</html>

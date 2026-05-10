@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Test Preview</title>
+<style>
+.modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.modal { background:white; border-radius:8px; padding:20px; max-width:90%; max-height:90%; overflow:auto; }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<button onclick="testPreview()">Test Preview</button>
+<div id="modal-preview" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="preview-title"></h3>
+    <div id="preview-body"></div>
+    <button onclick="document.getElementById('modal-preview').classList.add('hidden')">Close</button>
+  </div>
+</div>
+<script>
+function escHtml(t) { return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtS(s) { const m=Math.floor(s/60); const ss=Math.floor(s%60); return m+':'+String(ss).padStart(2,'0'); }
+
+async function testPreview() {
+  const origResp = await fetch('http://127.0.0.1:5050/api/project/flowbrain/sentences?version=optimized');
+  const oldS = await origResp.json();
+  const uploadedResp = await fetch('http://127.0.0.1:5050/api/project/flowbrain/sentences?version=uploaded');
+  const newS = await uploadedResp.json();
+  console.log('oldS:', oldS.length, 'newS:', newS.length);
+  showPreview('Test', oldS, newS);
+}

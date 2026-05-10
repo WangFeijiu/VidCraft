@@ -45,4 +45,5 @@ Thumbs.db
 # Project specific
 recordings/
 CosyVoice/pretrained_models/
-voice_studio/
+voice_studio/projects/
+voice_studio/__pycache__/
