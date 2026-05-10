@@ -2423,7 +2423,7 @@ function renderI2VNarration(body, st) {
   </div>`;
 
   html += `<div style="margin-top:16px;display:flex;gap:8px">
-    <button class="primary" onclick="generateI2V()" style="background:#6c5ce7;border-color:#6c5ce7">🎬 生成视频</button>
+    <button class="primary" id="btn-i2v-generate" onclick="generateI2V()" style="background:#6c5ce7;border-color:#6c5ce7" disabled>🎬 生成视频</button>
   </div>`;
   body.innerHTML = html;
   body.querySelectorAll('textarea').forEach(autoGrow);
@@ -2446,6 +2446,7 @@ async function toggleI2VVoice() {
       document.getElementById('i2v-voice-status').textContent = '已录制';
       document.getElementById('i2v-voice-status').classList.add('ok');
       document.getElementById('i2v-voice-confirm').style.display = 'block';
+      document.getElementById('btn-i2v-generate').disabled = false;
       // Auto-play for user to review
       p.play().catch(()=>{});
     };
@@ -2463,6 +2464,7 @@ function onI2VVoiceFile(e) {
   document.getElementById('i2v-voice-status').textContent = f.name;
   document.getElementById('i2v-voice-status').classList.add('ok');
   document.getElementById('i2v-voice-confirm').style.display = 'block';
+  document.getElementById('btn-i2v-generate').disabled = false;
 }
 
 async function generateI2V() {
