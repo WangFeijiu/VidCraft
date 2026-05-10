@@ -1018,8 +1018,14 @@ function showPreview(title, oldS, newS) {
 
   if(hasSource) {
     const container = document.getElementById('preview-body');
-    container.innerHTML = `<p style="margin-bottom:12px;color:#888;font-size:13px">原始 ${oldS.length} 句 → 优化后 ${newS.length} 句</p>`;
-    console.log('[showPreview] container cleared');
+
+    // Limit display to first 50 items for performance
+    const displayLimit = 50;
+    const totalItems = newS.length;
+    const limitedNewS = newS.slice(0, displayLimit);
+
+    container.innerHTML = `<p style="margin-bottom:12px;color:#888;font-size:13px">原始 ${oldS.length} 句 → 优化后 ${newS.length} 句${totalItems > displayLimit ? ` (仅显示前 ${displayLimit} 句)` : ''}</p>`;
+    console.log('[showPreview] container cleared, displaying', limitedNewS.length, 'of', totalItems);
 
     // Use DocumentFragment for batch DOM operations
     const fragment = document.createDocumentFragment();
@@ -1042,7 +1048,7 @@ function showPreview(title, oldS, newS) {
 
     let lastMatchedOld = 0;
     let rowCount = 0;
-    newS.forEach((nw, newIdx) => {
+    limitedNewS.forEach((nw, newIdx) => {
       if(newIdx % 20 === 0) console.log('[showPreview] processing newIdx:', newIdx);
       const sources = nw.source && nw.source.length > 0 ? nw.source : [newIdx+1];
       const isMerge = sources.length > 1;
@@ -1108,28 +1114,30 @@ function showPreview(title, oldS, newS) {
     });
     console.log('[showPreview] main loop done, rowCount:', rowCount);
 
-    // Show remaining unmatched old sentences at the end
-    const remainingUnmatched = oldS.length - lastMatchedOld;
-    if(remainingUnmatched > 0) {
-      console.log('[showPreview] showing', remainingUnmatched, 'remaining unmatched');
-    }
-    for(let oldIdx = lastMatchedOld + 1; oldIdx <= oldS.length; oldIdx++) {
-      if(!matchedOld.has(oldIdx)) {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:grid;grid-template-columns:1fr 40px 1fr;gap:12px;margin-bottom:16px;align-items:center';
-        row.innerHTML = `<div style="padding:6px 10px;background:#fff3cd;border-radius:4px;border-left:3px solid #ffc107">
-          <div style="font-size:11px;color:#aaa">${oldIdx}.</div>
-          <div style="font-size:13px;color:#856404">${escHtml((oldS[oldIdx-1]?.text || '').substring(0, 100))}</div>
-        </div>
-        <div style="text-align:center;color:#ccc;font-size:20px">✗</div>
-        <div style="padding:8px 12px;background:#f8f8f8;border-radius:0 4px 4px 0;border-left:3px solid #ccc">
-          <div style="font-size:12px;color:#999">未匹配</div>
-        </div>`;
-        fragment.appendChild(row);
-        rowCount++;
+    // Don't show remaining unmatched if we're limiting display
+    if(totalItems <= displayLimit) {
+      const remainingUnmatched = oldS.length - lastMatchedOld;
+      if(remainingUnmatched > 0) {
+        console.log('[showPreview] showing', remainingUnmatched, 'remaining unmatched');
       }
+      for(let oldIdx = lastMatchedOld + 1; oldIdx <= oldS.length; oldIdx++) {
+        if(!matchedOld.has(oldIdx)) {
+          const row = document.createElement('div');
+          row.style.cssText = 'display:grid;grid-template-columns:1fr 40px 1fr;gap:12px;margin-bottom:16px;align-items:center';
+          row.innerHTML = `<div style="padding:6px 10px;background:#fff3cd;border-radius:4px;border-left:3px solid #ffc107">
+            <div style="font-size:11px;color:#aaa">${oldIdx}.</div>
+            <div style="font-size:13px;color:#856404">${escHtml((oldS[oldIdx-1]?.text || '').substring(0, 100))}</div>
+          </div>
+          <div style="text-align:center;color:#ccc;font-size:20px">✗</div>
+          <div style="padding:8px 12px;background:#f8f8f8;border-radius:0 4px 4px 0;border-left:3px solid #ccc">
+            <div style="font-size:12px;color:#999">未匹配</div>
+          </div>`;
+          fragment.appendChild(row);
+          rowCount++;
+        }
+      }
+      console.log('[showPreview] remaining unmatched done, total rowCount:', rowCount);
     }
-    console.log('[showPreview] remaining unmatched done, total rowCount:', rowCount);
 
     console.log('[showPreview] appending fragment to container');
     container.appendChild(fragment);
