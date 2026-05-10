@@ -1042,6 +1042,8 @@ function showPreview(title, oldS, newS) {
 
     let lastMatchedOld = 0;
     let rowCount = 0;
+    const displayedOld = new Set(); // Track which old sentences have been displayed
+
     newS.forEach((nw, newIdx) => {
       if(newIdx % 20 === 0) console.log('[showPreview] processing newIdx:', newIdx);
       const sources = nw.source || [newIdx+1];
@@ -1079,8 +1081,15 @@ function showPreview(title, oldS, newS) {
       let leftHtml = '<div>';
       sources.forEach((oldIdx, i) => {
         const oldText = (oldS[oldIdx-1]?.text || '').substring(0, 100);
-        leftHtml += `<div style="padding:6px 10px;background:#f9f9f9;border-radius:4px;margin-bottom:${i<sources.length-1?'4px':'0'}">
-          <div style="font-size:11px;color:#aaa">${oldIdx}.</div>
+        const isRepeated = displayedOld.has(oldIdx);
+        displayedOld.add(oldIdx);
+
+        const bgColor = isRepeated ? '#f5f5f5' : '#f9f9f9';
+        const borderStyle = isRepeated ? 'border:1px dashed #ccc' : '';
+        const repeatTag = isRepeated ? '<span style="font-size:10px;color:#999;margin-left:4px">(重复引用)</span>' : '';
+
+        leftHtml += `<div style="padding:6px 10px;background:${bgColor};border-radius:4px;margin-bottom:${i<sources.length-1?'4px':'0'};${borderStyle}">
+          <div style="font-size:11px;color:#aaa">${oldIdx}.${repeatTag}</div>
           <div style="font-size:13px;color:#666;text-decoration:line-through">${escHtml(oldText)}</div>
         </div>`;
       });
