@@ -1044,17 +1044,17 @@ function showPreview(title, oldS, newS) {
     let rowCount = 0;
     newS.forEach((nw, newIdx) => {
       if(newIdx % 20 === 0) console.log('[showPreview] processing newIdx:', newIdx);
-      const sources = (nw.source && nw.source.length > 0) ? nw.source : [newIdx+1];
+      const sources = nw.source && nw.source.length > 0 ? nw.source : [newIdx+1];
       const isMerge = sources.length > 1;
       const isSplit = sources.length === 1 && oldRefCount.get(sources[0]) > 1;
 
       // Show unmatched old sentences before this new sentence
       const minSource = Math.min(...sources);
       const unmatchedCount = minSource - lastMatchedOld - 1;
-      if(unmatchedCount > 0) {
+      if(unmatchedCount > 0 && unmatchedCount < 1000) {
         console.log('[showPreview] showing', unmatchedCount, 'unmatched before newIdx:', newIdx);
       }
-      for(let oldIdx = lastMatchedOld + 1; oldIdx < minSource; oldIdx++) {
+      for(let oldIdx = lastMatchedOld + 1; oldIdx < minSource && oldIdx <= oldS.length; oldIdx++) {
         if(!matchedOld.has(oldIdx)) {
           const row = document.createElement('div');
           row.style.cssText = 'display:grid;grid-template-columns:1fr 40px 1fr;gap:12px;margin-bottom:16px;align-items:center';
