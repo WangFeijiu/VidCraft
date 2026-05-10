@@ -2199,7 +2199,7 @@ function renderI2VUploadPreview() {
   countEl.textContent = `${i2vFiles.length} / 60 张图片`;
   grid.innerHTML = i2vFiles.map((f, i) => {
     const url = URL.createObjectURL(f);
-    return `<div class="img-card" draggable="true" title="拖拽可调整顺序" data-i="${i}`
+    return `<div class="img-card" draggable="true" title="拖拽可调整顺序" data-i="${i}">`
       ondragstart="i2vPreviewDragStart(event,${i})" ondragover="i2vPreviewDragOver(event)"
       ondragenter="i2vPreviewDragEnter(event)" ondragleave="i2vPreviewDragLeave(event)"
       ondrop="i2vPreviewDrop(event,${i})" ondragend="i2vPreviewDragEnd(event)">
