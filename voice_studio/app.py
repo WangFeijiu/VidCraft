@@ -337,6 +337,24 @@ def api_cloned(name):
     return jsonify([int(f.name.split("_")[1])
                     for f in (pd(name) / "recordings").glob("s_*_clone.webm")])
 
+@app.route("/api/project/<name>/selected-sources")
+def api_selected_sources(name):
+    state = load_state(name)
+    return jsonify(state.get("selected_sources", {}))
+
+@app.route("/api/project/<name>/select-source/<int:idx>", methods=["POST"])
+def api_select_source(name, idx):
+    state = load_state(name)
+    selected = state.get("selected_sources", {})
+    data = request.get_json(silent=True) or {}
+    src = data.get("source", "")
+    if src in ("clone", "manual"):
+        selected[str(idx)] = src
+    elif src == "":
+        selected.pop(str(idx), None)
+    save_state(name, selected_sources=selected)
+    return jsonify({"ok": True})
+
 @app.route("/api/project/<name>/clone-audio/<int:idx>")
 def api_get_clone(name, idx):
     p = pd(name) / "recordings" / f"s_{idx:03d}_clone.webm"
@@ -361,12 +379,16 @@ def api_reject_clone(name, idx):
 @app.route("/api/project/<name>/accept-all-clones", methods=["POST"])
 def api_accept_all_clones(name):
     d = pd(name) / "recordings"
+    state = load_state(name)
+    selected = state.get("selected_sources", {})
     count = 0
     for f in d.glob("s_*_clone.webm"):
         idx_str = f.name.split("_")[1]
         dst = d / f"s_{idx_str}.webm"
         shutil.copy2(str(f), str(dst))
+        selected[idx_str] = "clone"
         count += 1
+    save_state(name, selected_sources=selected)
     return jsonify({"ok": True, "count": count})
 
 @app.route("/api/project/<name>/clone-preview-all")

@@ -747,6 +747,8 @@ async function refreshWork() {
     recordedSet = new Set(rec);
     const cln = await (await fetch(API+'/api/project/'+curProj+'/cloned')).json();
     clonedSet = new Set(cln);
+    const sel = await (await fetch(API+'/api/project/'+curProj+'/selected-sources')).json();
+    selectedSource = sel || {};
     renderRecorder(body);
   } else if(st.stage === 'composing') {
     body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎬</div><p style="margin-top:12px">${st.msg||'生成中...'}</p></div>`;
@@ -1645,8 +1647,11 @@ function renderRecDetail() {
     if(sel === 'manual' && rec){ useClone=false; useManual=true; }
     else if(sel === 'clone'){ useClone=true; useManual=false; }
     else if(rec && !hasClone){ useManual=true; useClone=false; }
-    else { useClone=true; useManual=false; }
-    html += `<div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px">`;
+    else { useClone=false; useManual=false; }  // 未选择过 → 谁都不选中
+    html += `<div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px;position:relative">`;
+    if(sel) {
+      html += `<span onclick="event.stopPropagation();clearSelection(${idx})" style="position:absolute;top:4px;right:6px;cursor:pointer;font-size:11px;color:#888;padding:2px 6px;border-radius:4px;z-index:1" title="取消选择" onmouseover="this.style.background='#eee'" onmouseout="this.style.background='transparent'">✕ 重置</span>`;
+    }
     html += `<div onclick="selectSource('clone')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useClone?'border:2px solid #2a9d3f':''}">
         <div style="display:flex;align-items:center;gap:12px">
           <span style="font-weight:500">🤖 克隆</span>
@@ -1684,13 +1689,17 @@ function scrollToActive() {
 let autoPlayPaused = false, rejectedSet = new Set(), selectedSource = {};  // {idx: 'clone'|'manual'}
 function onPlayerEnded() {
   if(autoPlayPaused || curIdx >= sentences.length-1) return;
-  if(clonedSet.has(curIdx+1)) {
+  const sel = selectedSource[curIdx+1];
+  // Only auto-accept clone if user hasn't explicitly chosen manual
+  if(clonedSet.has(curIdx+1) && sel !== 'manual') {
     selectedSource[curIdx+1] = 'clone';
-    // Persist to backend immediately so refresh doesn't lose the confirmation
     fetch(API+'/api/project/'+curProj+'/accept-clone/'+(curIdx+1), {method:'POST'});
-    updateRecListItem(curIdx);
-    updateRecProgress();
+    fetch(API+'/api/project/'+curProj+'/select-source/'+(curIdx+1), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({source:'clone'})});
   }
+  updateRecListItem(curIdx);
+  updateRecProgress();
   showCountdown(3);
 }
 function showCountdown(n) {
@@ -1739,10 +1748,18 @@ function stopAutoPlay() {
 function playCurrentClone() {
   if(curIdx >= sentences.length) return;
   const p = document.getElementById('player'); if(!p) return;
-  // Manual recording takes priority
-  if(recordedSet.has(curIdx+1)) { p.src = API+'/api/project/'+curProj+'/record/'+(curIdx+1)+'?t='+Date.now(); }
-  else if(clonedSet.has(curIdx+1)) { p.src = API+'/api/project/'+curProj+'/clone-audio/'+(curIdx+1)+'?t='+Date.now(); }
-  else return;
+  const idx = curIdx + 1;
+  const sel = selectedSource[idx];
+  // Respect user's explicit selection first
+  if(sel === 'manual' && recordedSet.has(idx)) {
+    p.src = API+'/api/project/'+curProj+'/record/'+idx+'?t='+Date.now();
+  } else if(sel === 'clone' && clonedSet.has(idx)) {
+    p.src = API+'/api/project/'+curProj+'/clone-audio/'+idx+'?t='+Date.now();
+  } else if(recordedSet.has(idx)) {
+    p.src = API+'/api/project/'+curProj+'/record/'+idx+'?t='+Date.now();
+  } else if(clonedSet.has(idx)) {
+    p.src = API+'/api/project/'+curProj+'/clone-audio/'+idx+'?t='+Date.now();
+  } else return;
   p.style.display='block'; p.play();
 }
 let voiceLibrary = []; // fetched from backend
@@ -2013,15 +2030,41 @@ async function toggleRec() { if(!mediaRecorder) return; if(!isRecording){chunks=
 async function onRecStop() { const blob=new Blob(chunks,{type:'audio/webm'}); const fd=new FormData(); fd.append('audio',blob,`s_${(curIdx+1).toString().padStart(3,'0')}.webm`); const r=await fetch(API+'/api/project/'+curProj+'/record/'+(curIdx+1),{method:'POST',body:fd}); if(r.ok){recordedSet.add(curIdx+1);rejectedSet.delete(curIdx+1);selectedSource[curIdx+1]='manual';updateRecListItem(curIdx);document.getElementById('rec-detail').innerHTML=renderRecDetail();const p=document.getElementById('player');p.src=URL.createObjectURL(blob);p.style.display='block';updateRecProgress();} }
 function playRec() { autoPlayPaused=true; const p=document.getElementById('player'); p.src=API+'/api/project/'+curProj+'/record/'+(curIdx+1)+'?t='+Date.now(); p.style.display='block'; p.play(); }
 function playCloneAudio() { autoPlayPaused=true; const p=document.getElementById('player'); p.src=API+'/api/project/'+curProj+'/clone-audio/'+(curIdx+1)+'?t='+Date.now(); p.style.display='block'; p.play(); }
-async function acceptClone() { await fetch(API+'/api/project/'+curProj+'/accept-clone/'+(curIdx+1),{method:'POST'}); recordedSet.add(curIdx+1); rejectedSet.delete(curIdx+1); updateRecListItem(curIdx); document.getElementById('rec-detail').innerHTML=renderRecDetail(); updateRecProgress(); }
+async function acceptClone() {
+  await fetch(API+'/api/project/'+curProj+'/accept-clone/'+(curIdx+1),{method:'POST'});
+  selectedSource[curIdx+1] = 'clone';
+  await fetch(API+'/api/project/'+curProj+'/select-source/'+(curIdx+1), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({source:'clone'})});
+  recordedSet.add(curIdx+1); rejectedSet.delete(curIdx+1);
+  updateRecListItem(curIdx); document.getElementById('rec-detail').innerHTML=renderRecDetail(); updateRecProgress();
+}
 async function selectSource(src) {
   selectedSource[curIdx+1] = src;
+  await fetch(API+'/api/project/'+curProj+'/select-source/'+(curIdx+1), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({source: src})
+  });
+  document.getElementById('rec-detail').innerHTML=renderRecDetail();
+}
+async function clearSelection(idx) {
+  delete selectedSource[idx];
+  await fetch(API+'/api/project/'+curProj+'/select-source/'+idx, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({source:''})});
+  updateRecListItem(idx-1); updateRecProgress();
   document.getElementById('rec-detail').innerHTML=renderRecDetail();
 }
 async function deleteManual() {
   await fetch(API+'/api/project/'+curProj+'/record/'+(curIdx+1),{method:'DELETE'});
   recordedSet.delete(curIdx+1);
-  if(selectedSource[curIdx+1]==='manual') delete selectedSource[curIdx+1];
+  if(selectedSource[curIdx+1]==='manual') {
+    delete selectedSource[curIdx+1];
+    await fetch(API+'/api/project/'+curProj+'/select-source/'+(curIdx+1), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({source:''})});
+  }
   updateRecListItem(curIdx); updateRecProgress();
   document.getElementById('rec-detail').innerHTML=renderRecDetail();
   toast('已删除','success');
