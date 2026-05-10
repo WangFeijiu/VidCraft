@@ -1686,19 +1686,19 @@ function renderRecDetail() {
   const i=curIdx, idx=i+1, total=sentences.length;
   if(i<0||i>=total) return '<p style="color:#888">请选择一句字幕</p>';
   const rec=recordedSet.has(idx), hasClone=clonedSet.has(idx);
-  let html = `<div style="margin-bottom:8px;color:#888;font-size:12px">第 ${idx} / ${total} 句</div>`;
+  const sel = selectedSource[idx];
+  let html = `<div style="margin-bottom:8px;color:#888;font-size:12px;display:flex;justify-content:space-between;align-items:center">
+      <span>第 ${idx} / ${total} 句</span>
+      ${sel ? '<span onclick="event.stopPropagation();clearSelection('+idx+')" style="cursor:pointer;font-size:12px;color:#888;padding:2px 8px;border-radius:4px" title="取消选择" onmouseover="this.style.background=\'#eee\'" onmouseout="this.style.background=\'transparent\'">✕ 重置</span>' : ''}
+    </div>`;
   html += `<div class="sent-box" style="font-size:20px;min-height:80px;margin-bottom:16px">${escHtml(sentences[i]?.text||'')}</div>`;
     if(hasClone) {
-    const sel = selectedSource[idx];
     let useClone, useManual;
     if(sel === 'manual' && rec){ useClone=false; useManual=true; }
     else if(sel === 'clone'){ useClone=true; useManual=false; }
     else if(rec && !hasClone){ useManual=true; useClone=false; }
     else { useClone=false; useManual=false; }  // 未选择过 → 谁都不选中
-    html += `<div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px;position:relative">`;
-    if(sel) {
-      html += `<span onclick="event.stopPropagation();clearSelection(${idx})" style="position:absolute;top:4px;right:6px;cursor:pointer;font-size:11px;color:#888;padding:2px 6px;border-radius:4px;z-index:1" title="取消选择" onmouseover="this.style.background='#eee'" onmouseout="this.style.background='transparent'">✕ 重置</span>`;
-    }
+    html += `<div style="padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee;margin-bottom:12px">`;
     html += `<div onclick="selectSource('clone')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useClone?'border:2px solid #2a9d3f':''}">
         <div style="display:flex;align-items:center;gap:12px">
           <span style="font-weight:500">🤖 克隆</span>
