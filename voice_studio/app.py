@@ -2,6 +2,9 @@
 import os, sys, json, re, base64, shutil, tempfile, threading, subprocess, traceback, uuid
 from pathlib import Path
 
+# Tracks which projects have been cancelled by user
+_cancel_clone = set()
+
 # ── Windows CUDA DLLs ──────────────────────────────────────────────
 if sys.platform == "win32":
     _vs = Path(r"E:/视频处理/.venv/Lib/site-packages")
@@ -26,6 +29,33 @@ COSYVOICE_DIR = Path(r"E:/视频处理/CosyVoice")
 IMG2VID    = BASE / "img2vid"
 IMG2VID.mkdir(exist_ok=True)
 
+VOICE_LIBRARY = [
+    {"id": "standard", "name": "标准播音", "desc": "清晰平稳的专业播报",
+     "instruct": "用标准播音的语气朗读，声音清晰、平稳、专业。"},
+    {"id": "deep", "name": "低沉磁性", "desc": "沉稳有力的浑厚风格",
+     "instruct": "用低沉浑厚的语气朗读，声音沉稳、有力、充满磁性，语速稍慢。"},
+    {"id": "humor", "name": "幽默风趣", "desc": "轻松有趣的讲述风格",
+     "instruct": "用轻松幽默的语气朗读，声音活泼、有趣，带有调侃的感觉，语速稍快。"},
+    {"id": "narrative", "name": "纪录片旁白", "desc": "娓娓道来的叙事风格",
+     "instruct": "用纪录片旁白的语气朗读，声音平和、客观，娓娓道来，像在讲述一段故事。"},
+    {"id": "warm", "name": "温柔知性", "desc": "温暖舒缓的叙事风格",
+     "instruct": "用温柔知性的语气朗读，声音温暖、舒缓，像知心朋友在轻声细语。"},
+    {"id": "lively", "name": "活泼俏皮", "desc": "轻快可爱的青春风格",
+     "instruct": "用活泼俏皮的语气朗读，声音轻快、可爱，充满青春活力，语速较快。"},
+    {"id": "serious", "name": "严肃正式", "desc": "字正腔圆的新闻风格",
+     "instruct": "用严肃正式的语气朗读，字正腔圆，像新闻联播的播音员。"},
+    {"id": "emotional", "name": "情感朗读", "desc": "富有感情的起伏风格",
+     "instruct": "用富有感情的语气朗读，声音中带有情感起伏，时而激昂时而舒缓。"},
+]
+
+# Global cache for voice previews
+VOICE_CACHE = BASE / "voice_cache"
+VOICE_CACHE.mkdir(exist_ok=True)
+
+# Custom voices saved by user
+CUSTOM_VOICES_DIR = BASE / "custom_voices"
+CUSTOM_VOICES_DIR.mkdir(exist_ok=True)
+
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", ping_timeout=600, ping_interval=120)
 
@@ -43,6 +73,24 @@ def _input_video(name):
         if f.suffix in (".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".ts", ".wmv"):
             return f
     return d / "input.mp4"
+def _active_sentences_path(name):
+    """Resolve the active sentences file based on recording_version in state."""
+    d = pd(name)
+    state = load_state(name)
+    v = state.get("recording_version", "")
+    if v == "uploaded" and (d / "sentences_uploaded.json").exists():
+        return d / "sentences_uploaded.json"
+    if v == "optimized" and (d / "sentences_optimized.json").exists():
+        return d / "sentences_optimized.json"
+    if v == "original" and (d / "sentences.json").exists():
+        return d / "sentences.json"
+    # Fallback to priority: uploaded > optimized > original
+    if (d / "sentences_uploaded.json").exists():
+        return d / "sentences_uploaded.json"
+    if (d / "sentences_optimized.json").exists():
+        return d / "sentences_optimized.json"
+    return d / "sentences.json"
+
 def load_state(name):
     p = pd(name) / "state.json"
     return json.loads(p.read_text("utf-8")) if p.exists() else {"stage": "new"}
@@ -128,15 +176,21 @@ def api_get_sents(name):
     """Get sentences with version info. Returns {active: 'original'|'optimized'|'uploaded', versions: {original: [...], ...}, sentences: [...]}"""
     d = pd(name)
     versions = {}
-    if (d / "sentences.json").exists():
-        versions['original'] = json.loads((d / "sentences.json").read_text("utf-8"))
-    if (d / "sentences_optimized.json").exists():
-        versions['optimized'] = json.loads((d / "sentences_optimized.json").read_text("utf-8"))
+    # Build in display-priority order: uploaded > optimized > original
     if (d / "sentences_uploaded.json").exists():
         versions['uploaded'] = json.loads((d / "sentences_uploaded.json").read_text("utf-8"))
+    if (d / "sentences_optimized.json").exists():
+        versions['optimized'] = json.loads((d / "sentences_optimized.json").read_text("utf-8"))
+    if (d / "sentences.json").exists():
+        versions['original'] = json.loads((d / "sentences.json").read_text("utf-8"))
 
-    # Priority: uploaded > optimized > original
-    active = 'uploaded' if 'uploaded' in versions else ('optimized' if 'optimized' in versions else 'original')
+    # Priority: uploaded > optimized > original (editing stage)
+    # In recording stage, use the locked recording_version if set
+    state = load_state(name)
+    if state.get("stage") == "recording" and state.get("recording_version") in versions:
+        active = state["recording_version"]
+    else:
+        active = 'uploaded' if 'uploaded' in versions else ('optimized' if 'optimized' in versions else 'original')
     sentences = versions.get(active, [])
 
     return jsonify({'active': active, 'versions': versions, 'sentences': sentences})
@@ -219,9 +273,16 @@ def api_reupload_video(name):
 
 @app.route("/api/project/<name>/stage", methods=["PUT"])
 def api_set_stage(name):
-    stage = request.json.get("stage", "")
+    data = request.json or {}
+    stage = data.get("stage", "")
     if stage in ("editing", "recording"):
-        save_state(name, stage=stage, msg="")
+        updates = {"stage": stage, "msg": ""}
+        # Lock the recording version so refreshWork uses the correct sentences
+        if stage == "recording":
+            version = data.get("version", "")
+            if version in ("original", "optimized", "uploaded"):
+                updates["recording_version"] = version
+        save_state(name, **updates)
     return jsonify({"ok": True})
 
 @app.route("/api/project/<name>/record/<int:idx>", methods=["POST"])
@@ -285,13 +346,53 @@ def api_accept_all_clones(name):
         count += 1
     return jsonify({"ok": True, "count": count})
 
+@app.route("/api/project/<name>/clone-preview-all")
+def api_clone_preview_all(name):
+    """Concatenate all clone recordings into one audio for preview."""
+    d = pd(name) / "recordings"
+    out = d / "_all_clones_preview.webm"
+    # Build list of clone files in order
+    files = sorted(d.glob("s_*_clone.webm"))
+    if not files:
+        return jsonify({"error": "没有克隆录音"}), 404
+    # Concatenate using ffmpeg concat demuxer
+    tmpdir = tempfile.mkdtemp(prefix="vs_")
+    try:
+        lines = []
+        for i, f in enumerate(files):
+            tmp_seg = os.path.join(tmpdir, f"s{i:04d}.webm")
+            shutil.copy2(str(f), tmp_seg)
+            lines.append(f"file 's{i:04d}.webm'")
+        concat_file = os.path.join(tmpdir, "concat.txt")
+        with open(concat_file, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines))
+        tmp_out = os.path.join(tmpdir, "out.webm")
+        subprocess.run([FFMPEG, "-y", "-f", "concat", "-safe", "0",
+                        "-i", concat_file, "-c", "copy", tmp_out],
+                       check=True, capture_output=True, encoding='utf-8', errors='ignore')
+        shutil.copy2(tmp_out, str(out))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return send_file(str(out), mimetype="audio/webm")
+def api_clear_clones(name):
+    """Delete all clone audio files so cloning can restart with a new voice."""
+    d = pd(name) / "recordings"
+    count = 0
+    for f in d.glob("s_*_clone.webm"):
+        f.unlink(missing_ok=True)
+        count += 1
+    save_state(name, stage="recording", msg="", clone_progress=[0, 0], voice_id="", clone_prompt_text="")
+    return jsonify({"ok": True, "deleted": count})
+
 @app.route("/api/project/<name>/regenerate-clone/<int:idx>", methods=["POST"])
 def api_regen_clone(name, idx):
     d = pd(name)
-    sentences = json.loads((d / "sentences.json").read_text("utf-8"))
+    sentences = json.loads(_active_sentences_path(name).read_text("utf-8"))
     if idx < 1 or idx > len(sentences):
         return jsonify({"error": "序号越界"}), 400
     prompt_text = request.json.get("prompt_text", "大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。")
+    state = load_state(name)
+    voice_id = state.get("voice_id", "")
     try:
         sys.path.insert(0, str(COSYVOICE_DIR))
         sys.path.insert(0, str(COSYVOICE_DIR / "third_party" / "Matcha-TTS"))
@@ -304,21 +405,35 @@ def api_regen_clone(name, idx):
         model = AutoModel(model_dir=model_dir)
 
         seg = sentences[idx - 1]
-        if "CosyVoice3" in model_name:
-            full_prompt = "You are a helpful assistant.<|endofprompt|>" + prompt_text
-        else:
-            full_prompt = prompt_text
-        sample_path = str(d / "voice_sample.wav")
+        voice = next((v for v in VOICE_LIBRARY if v["id"] == voice_id), None)
+        use_instruct = voice is not None and "CosyVoice" in model_name and "300M" not in model_name
 
-        for j, result in enumerate(model.inference_zero_shot(
-            seg["text"], full_prompt, sample_path, stream=False)):
-            wav_out = d / "recordings" / f"s_{idx:03d}_clone.wav"
-            torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
-            webm_out = d / "recordings" / f"s_{idx:03d}_clone.webm"
-            subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
-                            "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
-                           check=True, capture_output=True)
-            wav_out.unlink(missing_ok=True)
+        if use_instruct:
+            ref_wav = str(COSYVOICE_DIR / "asset" / voice.get("ref", "zero_shot_prompt.wav"))
+            for j, result in enumerate(model.inference_instruct2(
+                    seg["text"], voice["instruct"], ref_wav, stream=False)):
+                wav_out = d / "recordings" / f"s_{idx:03d}_clone.wav"
+                torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
+                webm_out = d / "recordings" / f"s_{idx:03d}_clone.webm"
+                subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
+                                "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
+                               check=True, capture_output=True)
+                wav_out.unlink(missing_ok=True)
+        else:
+            if "CosyVoice3" in model_name:
+                full_prompt = "You are a helpful assistant.<|endofprompt|>" + prompt_text
+            else:
+                full_prompt = prompt_text
+            sample_path = str(d / "voice_sample.wav")
+            for j, result in enumerate(model.inference_zero_shot(
+                seg["text"], full_prompt, sample_path, stream=False)):
+                wav_out = d / "recordings" / f"s_{idx:03d}_clone.wav"
+                torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
+                webm_out = d / "recordings" / f"s_{idx:03d}_clone.webm"
+                subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
+                                "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
+                               check=True, capture_output=True)
+                wav_out.unlink(missing_ok=True)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -721,10 +836,29 @@ def _pipeline_match(name, user_text):
 @app.route("/api/project/<name>/voice-clone", methods=["POST"])
 def api_voice_clone(name):
     d = pd(name)
+    voice_id = request.form.get("voice_id", "")
+    prompt_text = request.form.get("prompt_text", "大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。")
+
+    # Voice library mode: no sample upload needed
+    if voice_id and any(v["id"] == voice_id for v in VOICE_LIBRARY):
+        save_state(name, stage="cloning", msg="音色克隆中...", clone_progress=[0, 0],
+                   voice_id=voice_id, clone_prompt_text=prompt_text)
+        threading.Thread(target=_pipeline_voice_clone, args=(name, prompt_text, voice_id), daemon=True).start()
+        return jsonify({"ok": True})
+
+    # Custom voice mode: copy sample.wav to project dir
+    custom_voice_dir = CUSTOM_VOICES_DIR / voice_id if voice_id else None
+    if custom_voice_dir and (custom_voice_dir / "sample.wav").exists():
+        shutil.copy2(str(custom_voice_dir / "sample.wav"), str(d / "voice_sample.wav"))
+        save_state(name, stage="cloning", msg="音色克隆中...", clone_progress=[0, 0],
+                   voice_id=voice_id, clone_prompt_text=prompt_text)
+        threading.Thread(target=_pipeline_voice_clone, args=(name, prompt_text, voice_id), daemon=True).start()
+        return jsonify({"ok": True})
+
+    # User-uploaded sample mode
     f = request.files.get("sample")
     if not f:
-        return jsonify({"error": "请上传音色样本"}), 400
-    # Save uploaded sample, then convert to wav via ffmpeg
+        return jsonify({"error": "请上传音色样本或选择一个预设音色"}), 400
     raw_ext = Path(f.filename).suffix if f.filename else ".webm"
     raw_path = d / f"voice_sample_raw{raw_ext}"
     wav_path = d / "voice_sample.wav"
@@ -733,12 +867,195 @@ def api_voice_clone(name):
                     "-ar", "24000", "-ac", "1", "-f", "wav", str(wav_path)],
                    check=True, capture_output=True)
     raw_path.unlink(missing_ok=True)
-    prompt_text = request.form.get("prompt_text", "大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。")
-    save_state(name, stage="cloning", msg="音色克隆中...", clone_progress=[0, 0])
-    threading.Thread(target=_pipeline_voice_clone, args=(name, prompt_text), daemon=True).start()
+    save_state(name, stage="cloning", msg="音色克隆中...", clone_progress=[0, 0], clone_prompt_text=prompt_text)
+    threading.Thread(target=_pipeline_voice_clone, args=(name, prompt_text, ""), daemon=True).start()
     return jsonify({"ok": True})
 
-# ── Background pipelines ────────────────────────────────────────────
+def _load_custom_voices():
+    """Load all custom voice metadata from disk."""
+    voices = []
+    for d in sorted(CUSTOM_VOICES_DIR.iterdir()):
+        meta = d / "meta.json"
+        if d.is_dir() and meta.exists():
+            v = json.loads(meta.read_text("utf-8"))
+            v["custom"] = True
+            voices.append(v)
+    return voices
+
+@app.route("/api/voices")
+def api_list_voices():
+    return jsonify(VOICE_LIBRARY + _load_custom_voices())
+
+@app.route("/api/project/<name>/resume-clone", methods=["POST"])
+def api_resume_clone(name):
+    """Resume a stalled cloning task from where it left off."""
+    state = load_state(name)
+    if state.get("stage") != "cloning":
+        return jsonify({"error": "当前不在克隆阶段"}), 400
+    voice_id = state.get("voice_id", "")
+    prompt_text = state.get("clone_prompt_text",
+        "大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。")
+    save_state(name, stage="cloning", msg="恢复克隆中...", clone_progress=state.get("clone_progress", [0, 0]))
+    threading.Thread(target=_pipeline_voice_clone, args=(name, prompt_text, voice_id), daemon=True).start()
+    return jsonify({"ok": True})
+
+@app.route("/api/project/<name>/cancel-clone", methods=["POST"])
+def api_cancel_clone(name):
+    """Cancel an in-progress cloning task and clear all clone data."""
+    _cancel_clone.add(name)
+    # Delete all clone files
+    rec_dir = pd(name) / "recordings"
+    count = 0
+    for f in rec_dir.glob("s_*_clone.webm"):
+        f.unlink(missing_ok=True)
+        count += 1
+    for f in rec_dir.glob("s_*_clone.wav"):
+        f.unlink(missing_ok=True)
+    save_state(name, stage="recording", msg="", clone_progress=[0, 0], voice_id="", clone_prompt_text="")
+    return jsonify({"ok": True, "deleted": count})
+def api_voice_preview_get(voice_id):
+    """Stream a cached voice preview. Returns 404 if not yet generated."""
+    voice = next((v for v in VOICE_LIBRARY if v["id"] == voice_id), None)
+    if not voice:
+        return jsonify({"error": "未找到该音色"}), 404
+    cache_path = VOICE_CACHE / f"{voice_id}.webm"
+    if not cache_path.exists():
+        return jsonify({"error": "未缓存", "cached": False}), 404
+    return send_file(str(cache_path), mimetype="audio/webm")
+
+@app.route("/api/project/<name>/voice-preview", methods=["POST"])
+def api_voice_preview(name):
+    data = request.json or {}
+    voice_id = data.get("voice_id", "")
+    preview_text = data.get("text", "这是一段音色预览，你可以听一下这个声音的效果。")
+    voice = next((v for v in VOICE_LIBRARY if v["id"] == voice_id), None)
+    if not voice:
+        return jsonify({"error": "未找到该音色"}), 400
+
+    # Global cache
+    cache_path = VOICE_CACHE / f"{voice_id}.webm"
+    if cache_path.exists():
+        return send_file(str(cache_path), mimetype="audio/webm")
+
+    try:
+        sys.path.insert(0, str(COSYVOICE_DIR))
+        sys.path.insert(0, str(COSYVOICE_DIR / "third_party" / "Matcha-TTS"))
+        from cosyvoice.cli.cosyvoice import AutoModel
+        import torchaudio
+
+        model_dir, model_name = _get_cosyvoice_model()
+        if not model_dir:
+            return jsonify({"error": "未找到 CosyVoice 模型"}), 500
+        model = AutoModel(model_dir=model_dir)
+
+        ref_wav = str(COSYVOICE_DIR / "asset" / voice.get("ref", "zero_shot_prompt.wav"))
+        for j, result in enumerate(model.inference_instruct2(
+                preview_text, voice["instruct"], ref_wav, stream=False)):
+            wav_out = VOICE_CACHE / f"{voice_id}.wav"
+            torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
+            subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
+                            "-c:a", "libopus", "-b:a", "64k", str(cache_path)],
+                           check=True, capture_output=True)
+            wav_out.unlink(missing_ok=True)
+        if cache_path.exists():
+            return send_file(str(cache_path), mimetype="audio/webm")
+        return jsonify({"error": "生成失败"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/custom-voices", methods=["POST"])
+def api_save_voice():
+    """Save a voice sample as a reusable custom voice. Accepts FormData with sample audio + name."""
+    voice_name = request.form.get("name", "").strip()
+    prompt_text = request.form.get("prompt_text", "")
+    if not voice_name:
+        return jsonify({"error": "请输入音色名称"}), 400
+
+    f = request.files.get("sample")
+    if not f:
+        return jsonify({"error": "请上传音色样本"}), 400
+
+    # Create custom voice directory
+    voice_id = f"custom_{uuid.uuid4().hex[:8]}"
+    voice_dir = CUSTOM_VOICES_DIR / voice_id
+    voice_dir.mkdir(exist_ok=True)
+
+    # Save and convert to wav
+    raw_ext = Path(f.filename).suffix if f.filename else ".webm"
+    raw_path = voice_dir / f"sample_raw{raw_ext}"
+    wav_path = voice_dir / "sample.wav"
+    f.save(str(raw_path))
+    subprocess.run([FFMPEG, "-y", "-i", str(raw_path),
+                    "-ar", "24000", "-ac", "1", "-f", "wav", str(wav_path)],
+                   check=True, capture_output=True)
+    raw_path.unlink(missing_ok=True)
+
+    # Use the original recording as preview (no TTS generation)
+    preview_path = voice_dir / "preview.webm"
+    subprocess.run([FFMPEG, "-y", "-i", str(wav_path),
+                    "-c:a", "libopus", "-b:a", "64k", str(preview_path)],
+                   check=True, capture_output=True)
+
+    # Save metadata
+    meta = {"id": voice_id, "name": voice_name,
+            "desc": "用户保存的音色", "custom": True,
+            "prompt_text": prompt_text,
+            "created_at": __import__("datetime").datetime.now().isoformat(timespec="seconds")}
+    (voice_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), "utf-8")
+    return jsonify({"ok": True, "voice": meta})
+
+@app.route("/api/custom-voices/<voice_id>/rename", methods=["POST"])
+def api_rename_custom_voice(voice_id):
+    data = request.json or {}
+    new_name = data.get("name", "").strip()
+    if not new_name:
+        return jsonify({"error": "名称不能为空"}), 400
+    voice_dir = CUSTOM_VOICES_DIR / voice_id
+    meta_path = voice_dir / "meta.json"
+    if not voice_dir.exists() or not meta_path.exists():
+        return jsonify({"error": "未找到该音色"}), 404
+    meta = json.loads(meta_path.read_text("utf-8"))
+    meta["name"] = new_name
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), "utf-8")
+    return jsonify({"ok": True})
+
+@app.route("/api/custom-voices/<voice_id>", methods=["DELETE"])
+def api_delete_custom_voice(voice_id):
+    voice_dir = CUSTOM_VOICES_DIR / voice_id
+    if not voice_dir.exists() or not (voice_dir / "meta.json").exists():
+        return jsonify({"error": "未找到该音色"}), 404
+    # Check if this voice is currently being used for cloning in any project
+    for pdir in PROJECTS.iterdir():
+        if not pdir.is_dir():
+            continue
+        sp = pdir / "state.json"
+        if not sp.exists():
+            continue
+        try:
+            st = json.loads(sp.read_text("utf-8"))
+            if st.get("stage") == "cloning" and st.get("voice_id") == voice_id:
+                return jsonify({"error": "该音色正在克隆中使用，无法删除"}), 409
+        except Exception:
+            pass
+    shutil.rmtree(str(voice_dir))
+    return jsonify({"ok": True})
+
+@app.route("/api/custom-voices/<voice_id>/sample")
+def api_custom_voice_sample(voice_id):
+    """Return the sample audio of a custom voice (for cloning)."""
+    sample = CUSTOM_VOICES_DIR / voice_id / "sample.wav"
+    if not sample.exists():
+        return ("", 404)
+    return send_file(str(sample), mimetype="audio/wav")
+
+@app.route("/api/custom-voices/<voice_id>/preview")
+def api_custom_voice_preview(voice_id):
+    """Return the preview audio of a custom voice."""
+    preview = CUSTOM_VOICES_DIR / voice_id / "preview.webm"
+    if not preview.exists():
+        return ("", 404)
+    return send_file(str(preview), mimetype="audio/webm")
+
 def _pipeline_transcribe(name):
     d = pd(name)
     inp = _input_video(name)
@@ -795,7 +1112,7 @@ def _pipeline_compose(name):
     inp = _input_video(name)
     try:
         import numpy as np, soundfile as sf
-        sentences = json.loads((d / "sentences.json").read_text("utf-8"))
+        sentences = json.loads(_active_sentences_path(name).read_text("utf-8"))
         dur = load_state(name).get("duration", 600)
         SR = 24000
         total = int(dur * SR)
@@ -854,7 +1171,7 @@ def _get_cosyvoice_model():
             return str(COSYVOICE_DIR / "pretrained_models" / name), name
     return None, None
 
-def _pipeline_voice_clone(name, prompt_text):
+def _pipeline_voice_clone(name, prompt_text, voice_id=""):
     d = pd(name)
     try:
         sys.path.insert(0, str(COSYVOICE_DIR))
@@ -867,31 +1184,71 @@ def _pipeline_voice_clone(name, prompt_text):
             raise FileNotFoundError("未找到 CosyVoice 模型，请先下载模型到 E:/视频处理/CosyVoice/pretrained_models/")
 
         model = AutoModel(model_dir=model_dir)
-        sentences = json.loads((d / "sentences.json").read_text("utf-8"))
+        sentences = json.loads(_active_sentences_path(name).read_text("utf-8"))
         total = len(sentences)
-        save_state(name, stage="cloning", msg=f"音色克隆中 0/{total}...", clone_progress=[0, total])
 
-        # CosyVoice3 requires system prefix, CosyVoice2 uses plain text
-        if "CosyVoice3" in model_name:
-            full_prompt = "You are a helpful assistant.<|endofprompt|>" + prompt_text
+        # Check which sentences already have clone files (resume support)
+        rec_dir = d / "recordings"
+        done = sum(1 for i in range(total) if (rec_dir / f"s_{i+1:03d}_clone.webm").exists())
+        if done >= total:
+            save_state(name, stage="recording", msg="音色克隆完成，可试听或直接生成视频")
+            return
+        save_state(name, stage="cloning",
+                   msg=f"音色克隆中 {done}/{total}..." + ("（恢复中）" if done > 0 else ""),
+                   clone_progress=[done, total])
+
+        # Determine inference mode
+        voice = next((v for v in VOICE_LIBRARY if v["id"] == voice_id), None)
+        is_custom = voice_id.startswith("custom_") and (CUSTOM_VOICES_DIR / voice_id / "sample.wav").exists()
+        use_instruct = voice is not None and "CosyVoice" in model_name and "300M" not in model_name
+
+        if use_instruct:
+            # Voice library mode: use inference_instruct2
+            ref_wav = str(COSYVOICE_DIR / "asset" / voice.get("ref", "zero_shot_prompt.wav"))
+            for i, seg in enumerate(sentences):
+                if name in _cancel_clone:
+                    _cancel_clone.discard(name)
+                    return
+                if (rec_dir / f"s_{i+1:03d}_clone.webm").exists():
+                    continue  # Skip already cloned
+                for j, result in enumerate(model.inference_instruct2(
+                        seg["text"], voice["instruct"], ref_wav, stream=False)):
+                    wav_out = d / "recordings" / f"s_{i+1:03d}_clone.wav"
+                    torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
+                    webm_out = d / "recordings" / f"s_{i+1:03d}_clone.webm"
+                    subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
+                                    "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
+                                   check=True, capture_output=True)
+                    wav_out.unlink(missing_ok=True)
+                save_state(name, stage="cloning",
+                           msg=f"音色克隆中 {i+1}/{total}...",
+                           clone_progress=[i + 1, total])
         else:
-            full_prompt = prompt_text
-        sample_path = str(d / "voice_sample.wav")
+            # Zero-shot mode: use user-uploaded sample
+            if "CosyVoice3" in model_name:
+                full_prompt = "You are a helpful assistant.<|endofprompt|>" + prompt_text
+            else:
+                full_prompt = prompt_text
+            sample_path = str(d / "voice_sample.wav")
 
-        for i, seg in enumerate(sentences):
-            for j, result in enumerate(model.inference_zero_shot(
-                seg["text"], full_prompt, sample_path, stream=False)):
-                wav_out = d / "recordings" / f"s_{i+1:03d}_clone.wav"
-                torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
-                # convert to webm for compatibility (keep as separate clone file)
-                webm_out = d / "recordings" / f"s_{i+1:03d}_clone.webm"
-                subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
-                                "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
-                               check=True, capture_output=True)
-                wav_out.unlink(missing_ok=True)
-            save_state(name, stage="cloning",
-                       msg=f"音色克隆中 {i+1}/{total}...",
-                       clone_progress=[i + 1, total])
+            for i, seg in enumerate(sentences):
+                if name in _cancel_clone:
+                    _cancel_clone.discard(name)
+                    return
+                if (rec_dir / f"s_{i+1:03d}_clone.webm").exists():
+                    continue  # Skip already cloned
+                for j, result in enumerate(model.inference_zero_shot(
+                        seg["text"], full_prompt, sample_path, stream=False)):
+                    wav_out = d / "recordings" / f"s_{i+1:03d}_clone.wav"
+                    torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
+                    webm_out = d / "recordings" / f"s_{i+1:03d}_clone.webm"
+                    subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
+                                    "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
+                                   check=True, capture_output=True)
+                    wav_out.unlink(missing_ok=True)
+                save_state(name, stage="cloning",
+                           msg=f"音色克隆中 {i+1}/{total}...",
+                           clone_progress=[i + 1, total])
 
         save_state(name, stage="recording", msg="音色克隆完成，可试听或直接生成视频")
     except Exception as e:

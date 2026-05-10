@@ -25,7 +25,8 @@ h2{margin-bottom:20px}
 .card{background:#fff;border-radius:12px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
 .stage-bar{display:flex;gap:4px;margin-bottom:24px}
 .stage-bar .step{flex:1;padding:8px 4px;text-align:center;font-size:12px;border-radius:6px;background:#eee;color:#888}
-.stage-bar .step.done{background:#d4edda;color:#155724}
+.stage-bar .step.done{background:#d4edda;color:#155724;cursor:pointer}
+.stage-bar .step.done:hover{background:#b7dfb0}
 .stage-bar .step.active{background:#cce5ff;color:#004085;font-weight:bold}
 textarea.sent-row{width:100%;font-size:15px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;resize:vertical;font-family:inherit;line-height:1.5;overflow:hidden;min-height:40px}
 textarea.sent-row:focus{outline:none;border-color:#4a9eff}
@@ -71,6 +72,7 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
 .tab{padding:10px 24px;cursor:pointer;font-size:15px;color:#888;border-bottom:2px solid transparent;margin-bottom:-2px}
 .tab.active{color:#4a9eff;border-bottom-color:#4a9eff;font-weight:500}
 .tab:hover{color:#333}
+.voice-card:hover{border-color:#4a9eff!important;box-shadow:0 1px 6px rgba(74,158,255,.15)}
 
 /* Progress bar */
 .progress-bar{background:#eee;border-radius:8px;height:8px;margin:12px 0;overflow:hidden}
@@ -431,6 +433,9 @@ let recordedSet = new Set(), clonedSet = new Set(), dragFile = null;
 let mergeSelection = new Set(), pendingResult = null;
 let sentenceVersions = {}; // {original: [...], optimized: [...], uploaded: [...]}
 let activeVersion = 'original'; // current active version
+let selectedVoiceId = ''; // selected voice library preset
+let _progressPollTimer = null; // timer for polling progress in active stages
+let currentCloneVoiceId = ''; // voice_id used for current project's cloning
 
 // WebSocket connection
 const socket = io({
@@ -514,7 +519,30 @@ socket.on('match_progress', (data) => {
   }
 });
 
-// Render UI directly from WebSocket state (no HTTP request)
+// Progress polling for active stages (processing / cloning / composing)
+const ACTIVE_STAGES = new Set(['processing', 'cloning', 'composing']);
+function startProgressPoll() {
+  stopProgressPoll();
+  _progressPollTimer = setInterval(async () => {
+    if(!curProj) return;
+    try {
+      const st = await (await fetch(API+'/api/project/'+curProj)).json();
+      renderStages(st.stage);
+      if(ACTIVE_STAGES.has(st.stage)) {
+        renderFromState(st);
+      } else {
+        stopProgressPoll();
+        sentences = [];
+        await refreshWork();
+      }
+    } catch {}
+  }, 3000);
+}
+function stopProgressPoll() {
+  if(_progressPollTimer) { clearInterval(_progressPollTimer); _progressPollTimer = null; }
+}
+
+// Render UI directly from state (used by WebSocket + polling)
 function renderFromState(st) {
   const body = document.getElementById('work-body');
   if(!body) return;
@@ -529,7 +557,7 @@ function renderFromState(st) {
   } else if(st.stage === 'cloning') {
     const prog = st.clone_progress || [0, 1];
     const pct = prog[1]>0 ? Math.round(prog[0]/prog[1]*100) : 0;
-    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'音色克隆中...'}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888">${prog[0]}/${prog[1]}</p></div>`;
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'克隆录音中...'}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888">${prog[0]}/${prog[1]}</p></div>`;
   } else if(st.stage === 'composing') {
     body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎬</div><p style="margin-top:12px">${st.msg||'生成中...'}</p></div>`;
   } else {
@@ -539,7 +567,7 @@ function renderFromState(st) {
 }
 
 // Confirm dialog replacement
-function showConfirm(title, message) {
+function showConfirm(title, message, okText, cancelText) {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
@@ -547,8 +575,8 @@ function showConfirm(title, message) {
       <h3>${escHtml(title)}</h3>
       ${message ? `<p style="margin:16px 0;line-height:1.6;color:#666">${escHtml(message)}</p>` : ''}
       <div class="btn-row">
-        <button onclick="this.closest('.modal-overlay').remove();window._confirmResolve(false)">取消</button>
-        <button class="primary" onclick="this.closest('.modal-overlay').remove();window._confirmResolve(true)">确定</button>
+        <button onclick="this.closest('.modal-overlay').remove();window._confirmResolve(false)">${escHtml(cancelText||'取消')}</button>
+        <button class="primary" onclick="this.closest('.modal-overlay').remove();window._confirmResolve(true)">${escHtml(okText||'确定')}</button>
       </div>
     </div>`;
     document.body.appendChild(modal);
@@ -695,6 +723,7 @@ async function refreshWork() {
   _refreshing = true;
   try {
   const st = await (await fetch(API+'/api/project/'+curProj)).json();
+  currentCloneVoiceId = st.voice_id || '';
   renderStages(st.stage);
   const body = document.getElementById('work-body');
   if(st.stage === 'processing') {
@@ -725,22 +754,45 @@ async function refreshWork() {
     if(!sentences.length) await loadSentenceVersions();
     const prog = st.clone_progress || [0, sentences.length];
     const pct = prog[1]>0 ? Math.round(prog[0]/prog[1]*100) : 0;
-    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'音色克隆中...'}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888">${prog[0]}/${prog[1]}</p></div>`;
+    const voiceName = currentCloneVoiceId ? (voiceLibrary.find(v=>v.id===currentCloneVoiceId)||{}).name||currentCloneVoiceId : '自定义音色';
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'克隆录音中...'}</p><p style="font-size:13px;color:#888;margin-top:4px">使用音色：${escHtml(voiceName)}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888">${prog[0]}/${prog[1]}</p><div style="margin-top:12px;display:flex;gap:8px;justify-content:center"><button style="font-size:13px;color:#e04040;padding:6px 16px;border:1px solid #e04040;border-radius:6px;cursor:pointer;background:rgba(224,64,64,0.06)" onclick="cancelClone()">✕ 取消克隆</button><button style="font-size:13px;padding:6px 16px;border:1px solid #ccc;border-radius:6px;cursor:pointer" onclick="backFromError()">← 返回编辑字幕</button></div></div>`;
   } else if(st.stage === 'done') {
         body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px">✅</div><h3 style="margin:12px 0">视频已生成</h3><a href="${API}/api/project/${curProj}/download" class="primary" style="display:inline-block;padding:12px 32px;text-decoration:none;border-radius:8px;background:#4a9eff;color:#fff">⬇ 下载最终视频</a><p style="margin-top:16px"><button onclick="curProj=null;show('v-empty')">返回</button></p></div>`;
   } else if(st.stage === 'error') {
     body.innerHTML = `<div class="card" style="padding:24px;color:#d9534f"><b>错误：</b><br>${(st.msg||'').replace(/\n/g,'<br>')}</div><div style="margin-top:12px"><button onclick="backFromError()">← 返回编辑字幕</button></div>`;
   } else { body.innerHTML = ''; }
+  if(ACTIVE_STAGES.has(st.stage)) startProgressPoll(); else stopProgressPoll();
   } finally { _refreshing = false; }
+}
+
+async function cancelClone() {
+  if(!await showConfirm('取消克隆', '取消后将清除所有已生成的克隆录音，此操作不可恢复。确定取消吗？')) return;
+  await fetch(API+'/api/project/'+curProj+'/cancel-clone', {method:'POST'});
+  clonedSet = new Set();
+  currentCloneVoiceId = '';
+  selectedVoiceId = '';
+  toast('已取消克隆并清除录音','success');
+  await refreshWork();
 }
 
 function renderStages(stage) {
   const steps = [{k:'editing',l:'编辑'},{k:'recording',l:'录音'},{k:'composing',l:'生成'}];
   let hit = false;
   document.getElementById('stages').innerHTML = steps.map(s => {
-    const cls = stage===s.k?'active':(hit?'':'done'); if(stage===s.k) hit=true;
-    return `<div class="step ${cls}">${s.l}</div>`;
+    const done = !hit && stage!==s.k;
+    const cls = stage===s.k?'active':(done?'done':'');
+    if(stage===s.k) hit=true;
+    const click = done ? ` onclick="goToStage('${s.k}')"` : '';
+    return `<div class="step ${cls}"${click}>${s.l}</div>`;
   }).join('');
+}
+async function goToStage(stage) {
+  if(stage === 'editing') { await goToEditing(); }
+  else if(stage === 'recording') {
+    await fetch(API+'/api/project/'+curProj+'/stage', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({stage:'recording'})});
+    sentences = [];
+    await refreshWork();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -761,6 +813,13 @@ async function goToEditing() {
   await refreshWork();
 }
 async function backFromError() {
+  // If stuck in cloning, cancel the thread and clean up
+  const st = await (await fetch(API+'/api/project/'+curProj)).json();
+  if(st.stage === 'cloning') {
+    await fetch(API+'/api/project/'+curProj+'/cancel-clone', {method:'POST'});
+    clonedSet = new Set();
+    currentCloneVoiceId = '';
+  }
   await fetch(API+'/api/project/'+curProj+'/stage', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({stage:'recording'})});
   sentences = [];
   await refreshWork();
@@ -789,7 +848,9 @@ function renderEditor(body) {
 
   // Version selector
   const versionNames = {original: '原始转写', optimized: 'AI 优化', uploaded: '用户上传'};
-  const availableVersions = Object.keys(sentenceVersions);
+  // Display order: uploaded > optimized > original
+  const versionOrder = ['uploaded', 'optimized', 'original'];
+  const availableVersions = Object.keys(sentenceVersions).sort((a, b) => versionOrder.indexOf(a) - versionOrder.indexOf(b));
   let versionHtml = '';
   if(availableVersions.length > 1) {
     versionHtml = `<div style="margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:6px;display:flex;align-items:center;gap:8px">
@@ -821,7 +882,7 @@ function renderEditor(body) {
   html += sentences.map((s,i) =>
     `<div class="sent-item" id="si-${i}"><input type="checkbox" class="chk" data-i="${i}" onchange="onCheckMerge(${i},this.checked)"><span class="idx">${i+1}</span><textarea class="sent-row" rows="1" data-i="${i}" oninput="autoGrow(this)">${s.text}</textarea><span class="dur">${fmtS(s.start)}→${fmtS(s.end)}</span></div>`
   ).join('');
-  html += `<div style="margin-top:16px"><button class="primary" onclick="saveSentences()">💾 保存字幕，进入录音</button></div>`;
+  html += `<div style="margin-top:16px"><button class="primary" onclick="saveSentences(true)">💾 保存字幕，进入录音</button></div>`;
   body.innerHTML = html;
   body.querySelectorAll('textarea').forEach(autoGrow);
 }
@@ -855,17 +916,33 @@ function mergeSelected() {
   sentences.splice(sorted[0], sorted.length, merged);
   renderEditor(document.getElementById('work-body'));
 }
-async function saveSentences() {
+async function saveSentences(enterRecording) {
+  // Read textarea values
   document.querySelectorAll('.sent-row').forEach((ta,i) => { if(sentences[i]) sentences[i].text = ta.value; });
 
-  // Check if there are recordings
-  const hasRecResp = await fetch(API+'/api/project/'+curProj+'/has-recordings');
-  const hasRecData = await hasRecResp.json();
+  // If entering recording, show version selector modal
+  if(enterRecording) {
+    const chosen = await showEnterRecordingModal();
+    if(!chosen) return; // cancelled
+    // Switch to chosen version if different
+    if(chosen !== activeVersion && sentenceVersions[chosen]) {
+      activeVersion = chosen;
+      sentences = sentenceVersions[chosen];
+    }
+  }
 
-  if(hasRecData.has_recordings) {
-    // Warn user that changed sentences will have their recordings cleared
-    if(!confirm('检测到已有录音。\n\n保存修改后，被修改的句子对应的录音将被清空，需要重新录制。\n\n是否继续保存？')) {
-      return;
+  // Check if text actually changed
+  const originalTexts = (sentenceVersions[activeVersion]||[]).map(s => s.text);
+  const hasChanges = sentences.length !== originalTexts.length ||
+    sentences.some((s, i) => s.text !== (originalTexts[i]||''));
+
+  if(hasChanges) {
+    const hasRecResp = await fetch(API+'/api/project/'+curProj+'/has-recordings');
+    const hasRecData = await hasRecResp.json();
+    if(hasRecData.has_recordings) {
+      if(!await showConfirm('字幕已修改', '部分句子的内容有变化，对应的录音需要重新录制。是否继续保存？')) {
+        return;
+      }
     }
   }
 
@@ -889,6 +966,15 @@ async function saveSentences() {
     toast(`字幕已保存，已清空 ${result.changed_indices.length} 句的录音`, 'success');
   } else {
     toast('字幕已保存', 'success');
+  }
+
+  if(enterRecording) {
+    // Transition to recording stage, locking current version
+    await fetch(API+'/api/project/'+curProj+'/stage', {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({stage:'recording', version: activeVersion})
+    });
   }
 
   await refreshWork();
@@ -982,6 +1068,11 @@ function showLLMError(errorMsg) {
 
 async function doOptimize() {
   if(!await checkLLM()) return;
+  // Warn if optimized version already exists
+  const versionNames = {original: '原始转写', optimized: 'AI 优化', uploaded: '用户上传'};
+  if(sentenceVersions['optimized']) {
+    if(!await showConfirm('重新优化', `已存在「AI 优化」版本（${sentenceVersions['optimized'].length} 句），重新优化将覆盖该版本。确认继续？`)) return;
+  }
   // Ask user for video description
   const desc = await showOptimizeInput();
   if(desc === null) return; // cancelled
@@ -997,6 +1088,41 @@ async function doOptimize() {
     const data = await safeJSON(r);
     if(data.error) { showLLMError(data.error); renderEditor(body); return; }
   } catch(e) { showLLMError('请求失败: '+e.message); renderEditor(body); }
+}
+
+function showEnterRecordingModal() {
+  const versionNames = {original: '原始转写', optimized: 'AI 优化', uploaded: '用户上传'};
+  const available = Object.keys(sentenceVersions);
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    const optionsHtml = available.map(k => {
+      const cnt = (sentenceVersions[k]||[]).length;
+      const selected = k === activeVersion ? 'selected' : '';
+      return `<option value="${k}" ${selected}>${versionNames[k]||k}（${cnt} 句）</option>`;
+    }).join('');
+    modal.innerHTML = `<div class="modal" style="max-width:440px">
+      <h3>进入录音</h3>
+      <p style="margin:12px 0;color:#666;line-height:1.6">选择要用于录音的字幕版本：</p>
+      <select id="rec-version-select" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:14px;appearance:auto;background:#fff">
+        ${optionsHtml}
+      </select>
+      <p id="rec-version-hint" style="margin-top:8px;font-size:13px;color:#888">
+        将以「<span style="color:#007bff;font-weight:500">${versionNames[activeVersion]||activeVersion}</span>」版本进入录音
+      </p>
+      <div class="btn-row" style="margin-top:16px">
+        <button onclick="this.closest('.modal-overlay').remove();window._recVerResolve(null)">取消</button>
+        <button class="primary" onclick="const v=document.getElementById('rec-version-select').value;this.closest('.modal-overlay').remove();window._recVerResolve(v)">确认进入录音</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    window._recVerResolve = resolve;
+    // Update hint text when selection changes
+    modal.querySelector('#rec-version-select').addEventListener('change', function() {
+      const hint = modal.querySelector('#rec-version-hint');
+      hint.innerHTML = `将以「<span style="color:#007bff;font-weight:500">${versionNames[this.value]||this.value}</span>」版本进入录音`;
+    });
+  });
 }
 
 function showOptimizeInput() {
@@ -1020,7 +1146,11 @@ function showOptimizeInput() {
     setTimeout(() => document.getElementById('opt-desc-input')?.focus(), 100);
   });
 }
-function uploadSubtitles() {
+async function uploadSubtitles() {
+  const versionNames = {original: '原始转写', optimized: 'AI 优化', uploaded: '用户上传'};
+  if(sentenceVersions['uploaded']) {
+    if(!await showConfirm('重新上传', `已存在「用户上传」版本（${sentenceVersions['uploaded'].length} 句），重新上传将覆盖该版本。确认继续？`)) return;
+  }
   const inp = document.createElement('input'); inp.type='file'; inp.accept='.srt,.txt,.json';
   inp.onchange = async e => {
     const file = e.target.files[0]; if(!file) return;
@@ -1485,8 +1615,10 @@ async function saveLLM() {
 // Recorder
 // ═══════════════════════════════════════════════════════════════
 function renderRecorder(body) {
-  const hasCloned = clonedSet.size > 0;
-  body.innerHTML = `<div style="margin-bottom:12px"><button onclick="goToEditing()">← 返回编辑字幕</button></div><div class="tabs"><div class="tab ${hasCloned?'':'active'}" onclick="showRecTab('clone')" id="tab-clone">音色克隆</div><div class="tab ${hasCloned?'active':''}" onclick="showRecTab('manual')" id="tab-manual">逐句录音</div></div><div id="rec-clone" class="${hasCloned?'hidden':''}">${renderCloneRec()}</div><div id="rec-manual" class="${hasCloned?'':'hidden'}">${renderManualRec()}</div>`;
+  const allCloned = sentences.length > 0 && clonedSet.size >= sentences.length;
+  body.innerHTML = `<div style="margin-bottom:12px"><button onclick="goToEditing()">← 返回编辑字幕</button></div><div class="tabs"><div class="tab ${allCloned?'':'active'}" onclick="showRecTab('clone')" id="tab-clone">克隆录音</div><div class="tab ${allCloned?'active':''}" onclick="showRecTab('manual')" id="tab-manual">逐句录音</div></div><div id="rec-clone" class="${allCloned?'hidden':''}">${renderCloneRec()}</div><div id="rec-manual" class="${allCloned?'':'hidden'}">${renderManualRec()}</div>`;
+  // Load voice library asynchronously
+  if(!voiceLibrary.length) loadVoiceLibrary().then(() => { const el = document.getElementById('rec-clone'); if(el) el.innerHTML = renderCloneRec(); });
 }
 function renderManualRec() {
   const idx=curIdx, total=sentences.length;
@@ -1602,19 +1734,135 @@ function playCurrentClone() {
   else return;
   p.style.display='block'; p.play();
 }
+let voiceLibrary = []; // fetched from backend
+async function loadVoiceLibrary() {
+  try { const r = await fetch(API+'/api/voices'); voiceLibrary = await r.json(); } catch { voiceLibrary = []; }
+}
+
 function renderCloneRec() {
   const hasCloned = clonedSet.size > 0;
-  let html = `<div class="card" style="padding:20px"><p style="margin-bottom:12px">录制一段 10-30 秒语音样本，系统将克隆音色自动生成所有句子。</p>
-    <label style="display:block;margin:12px 0 4px;font-weight:500">样本文字</label><textarea id="clone-prompt" style="width:100%;height:80px;resize:vertical;font-family:inherit;font-size:14px;padding:8px;border:1px solid #ccc;border-radius:6px">大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。</textarea>
+  const builtIn = voiceLibrary.filter(v => !v.custom);
+  const custom = voiceLibrary.filter(v => v.custom);
+  let html = `<div class="card" style="padding:20px">`;
+
+  // Built-in voice library
+  html += `<label style="display:block;margin-bottom:8px;font-weight:500">选择音色</label>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px">
+    ${builtIn.map(v => `
+      <div id="voice-${v.id}" class="voice-card" onclick="selectVoice('${v.id}')" style="padding:10px 12px;border:2px solid ${selectedVoiceId===v.id?'#4a9eff':'#e0e0e0'};border-radius:8px;cursor:pointer;transition:border-color .2s">
+        <div style="font-weight:500;font-size:14px;margin-bottom:2px">${escHtml(v.name)}</div>
+        <div style="font-size:12px;color:#888;line-height:1.3">${escHtml(v.desc)}</div>
+        <button onclick="event.stopPropagation();previewVoice('${v.id}')" style="margin-top:6px;font-size:11px;padding:2px 8px;background:#f0f0f0;border:1px solid #ddd;border-radius:4px;cursor:pointer">▶ 试听</button>
+      </div>
+    `).join('')}
+    </div>`;
+
+  // Custom voices section
+  if(custom.length > 0) {
+    html += `<div style="margin-bottom:12px"><div style="font-size:13px;color:#888;margin-bottom:4px">自定义音色库</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">
+    ${custom.map(v => `
+      <div id="voice-${v.id}" class="voice-card" onclick="selectVoice('${v.id}')" style="padding:10px 12px;border:2px solid ${selectedVoiceId===v.id?'#4a9eff':'#e0e0e0'};border-radius:8px;cursor:pointer;transition:border-color .2s;position:relative" onmouseover="this.querySelector('.cv-actions').style.display='flex'" onmouseout="this.querySelector('.cv-actions').style.display='none'">
+        <div class="cv-actions" style="display:none;position:absolute;top:4px;right:4px;gap:2px;align-items:center">
+          <span onclick="event.stopPropagation();renameCustomVoice('${v.id}','${escHtml(v.name)}')" style="cursor:pointer;color:#4a9eff;font-size:14px;padding:2px 6px;line-height:1;border-radius:4px;background:rgba(74,158,255,0.1);transition:background .2s" onmouseover="this.style.background='rgba(74,158,255,0.25)'" onmouseout="this.style.background='rgba(74,158,255,0.1)'">✎</span>
+          <span onclick="event.stopPropagation();deleteCustomVoice('${v.id}','${escHtml(v.name)}')" style="cursor:pointer;color:#e04040;font-size:14px;padding:2px 6px;line-height:1;border-radius:4px;background:rgba(224,64,64,0.1);transition:background .2s" onmouseover="this.style.background='rgba(224,64,64,0.25)'" onmouseout="this.style.background='rgba(224,64,64,0.1)'">×</span>
+        </div>
+        <div style="font-weight:500;font-size:14px;margin-bottom:2px;padding-right:20px">${escHtml(v.name)}</div>
+        <div style="font-size:12px;color:#888;line-height:1.3">${escHtml(v.desc)}</div>
+        <div style="margin-top:6px">
+          <button onclick="event.stopPropagation();previewCustomVoice('${v.id}')" style="font-size:11px;padding:2px 8px;background:#f0f0f0;border:1px solid #ddd;border-radius:4px;cursor:pointer">▶ 试听</button>
+        </div>
+      </div>
+    `).join('')}
+    </div></div>`;
+  }
+
+  html += `<audio id="voice-preview-player" controls style="width:100%;margin-bottom:12px;display:none"></audio>`;
+
+  // Selected voice action
+  if(selectedVoiceId) {
+    const v = voiceLibrary.find(x => x.id === selectedVoiceId);
+    if(v) html += `<div style="margin-bottom:12px"><button class="primary" onclick="startCloneWithVoice()">✨ 使用「${escHtml(v.name)}」生成全部</button></div>`;
+  }
+
+  // Divider
+  html += `<div style="text-align:center;margin:16px 0;color:#aaa;font-size:13px;border-top:1px solid #eee;padding-top:12px">或录制 / 上传自己的音色样本</div>`;
+
+  // Existing record/upload section
+  html += `<label style="display:block;margin:12px 0 4px;font-weight:500">样本文字</label><textarea id="clone-prompt" style="width:100%;height:80px;resize:vertical;font-family:inherit;font-size:14px;padding:8px;border:1px solid #ccc;border-radius:6px">大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。</textarea>
     <label style="display:block;margin:12px 0 4px;font-weight:500">录制或上传样本</label>
-    <div style="display:flex;gap:8px;align-items:center"><button id="clone-rec-btn" onclick="toggleCloneRec()">🎙 录制</button><button onclick="document.getElementById('clone-file').click()">📁 上传</button><input type="file" id="clone-file" accept="audio/*" style="display:none" onchange="onCloneFile(event)"><span id="clone-status" style="color:#888;font-size:13px"></span></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button id="clone-rec-btn" onclick="toggleCloneRec()">🎙 录制</button><button onclick="document.getElementById('clone-file').click()">📁 上传</button><input type="file" id="clone-file" accept="audio/*" style="display:none" onchange="onCloneFile(event)"><span id="clone-status" style="color:#888;font-size:13px"></span><button id="btn-save-voice" onclick="showSaveVoiceModal()" disabled style="margin-left:auto;font-size:12px">💾 保存到音色库</button></div>
     <audio id="clone-player" controls style="width:100%;margin-top:8px;display:none"></audio>
     <div style="margin-top:16px"><button class="primary" id="btn-clone-gen" onclick="startClone()" disabled>🎙 一键生成全部</button></div>`;
-  if(hasCloned) {
-    html += `<div style="margin-top:16px;padding-top:16px;border-top:1px solid #eee"><p style="margin-bottom:8px;color:#2a9d3f;font-weight:500">✓ 已生成 ${clonedSet.size} 句克隆音频</p><p style="color:#888;font-size:13px;margin-bottom:12px">可切换到「逐句录音」页面试听并逐句选择，或一键全部采用：</p><button style="background:#2a9d3f;color:#fff;border-color:#2a9d3f" onclick="acceptAllClones()">✓ 一键全部采用克隆音频</button></div>`;
+  if(hasCloned && sentences.length > 0) {
+    const total = sentences.length;
+    const allDone = clonedSet.size >= total;
+    const voiceName = currentCloneVoiceId ? (voiceLibrary.find(v=>v.id===currentCloneVoiceId)||{}).name||currentCloneVoiceId : '自定义音色';
+    const voiceLabel = currentCloneVoiceId ? `<span style="color:#007bff">${escHtml(voiceName)}</span>` : '自定义音色';
+    if(allDone) {
+      html += `<div style="margin-top:16px;padding-top:16px;border-top:1px solid #eee">
+        <p style="color:#2a9d3f;font-weight:500;font-size:15px">✓ 已全部生成好（${clonedSet.size} 句，音色：${voiceLabel}）</p>
+        <div style="margin-top:10px">
+          <p style="font-size:13px;color:#666;margin-bottom:6px">试听全部录音：</p>
+          <audio controls style="width:100%" src="${API}/api/project/${curProj}/clone-preview-all"></audio>
+        </div>
+        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;gap:8px">
+            <button class="primary" style="font-size:13px;padding:8px 16px" onclick="acceptAllClones()">✓ 一键采纳全部录音</button>
+            <button style="font-size:13px;padding:8px 16px;border:1px solid #4a9eff;border-radius:6px;color:#4a9eff;cursor:pointer;background:rgba(74,158,255,0.06)" onclick="showRecTab('manual')">🎧 逐句试听</button>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button style="font-size:12px;color:#888;padding:4px 10px;border:1px solid #ddd;border-radius:4px;cursor:pointer" onclick="abandonClones()">放弃全部录音</button>
+            <button style="font-size:12px;color:#4a9eff;padding:4px 10px;border:1px solid #4a9eff;border-radius:4px;cursor:pointer;background:rgba(74,158,255,0.08)" onclick="switchVoiceHint()">换音色重新生成</button>
+          </div>
+        </div>
+      </div>`;
+    } else {
+      html += `<div style="margin-top:16px;padding-top:16px;border-top:1px solid #eee">
+        <p style="color:#666;font-weight:500">已生成 ${clonedSet.size} / ${total} 句克隆音频（音色：${voiceLabel}）</p>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="primary" onclick="resumeClone()">▶ 继续完成剩下的克隆</button>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button style="font-size:12px;color:#888;padding:4px 10px;border:1px solid #ddd;border-radius:4px;cursor:pointer" onclick="abandonClones()">放弃全部录音</button>
+          <button style="font-size:12px;color:#4a9eff;padding:4px 10px;border:1px solid #4a9eff;border-radius:4px;cursor:pointer;background:rgba(74,158,255,0.08)" onclick="switchVoiceHint()">换一个音色重新生成</button>
+        </div>
+      </div>`;
+    }
   }
   html += `</div>`;
   return html;
+}
+async function selectVoice(voiceId) {
+  // If clicking the same voice, just deselect
+  if(selectedVoiceId === voiceId) { selectedVoiceId = ''; document.getElementById('rec-clone').innerHTML = renderCloneRec(); return; }
+  // If there are existing clones with a different voice, ask user what to do
+  if(clonedSet.size > 0 && currentCloneVoiceId && currentCloneVoiceId !== voiceId) {
+    const ok = await showConfirm('切换音色', `已用其他音色生成了 ${clonedSet.size} 句克隆录音。是否用新音色全部重新生成？（原有录音将被删除）`, '重新生成', '继续完成');
+    if(ok) {
+      // Clear all clones and restart
+      await fetch(API+'/api/project/'+curProj+'/clear-clones', {method:'POST'});
+      clonedSet = new Set();
+    }
+    // Regardless, switch to new voice
+  }
+  selectedVoiceId = voiceId;
+  document.getElementById('rec-clone').innerHTML = renderCloneRec();
+}
+function previewVoice(voiceId) {
+  const player = document.getElementById('voice-preview-player');
+  player.src = API+'/api/voice-preview/'+voiceId;
+  player.style.display = 'block';
+  player.play();
+}
+async function startCloneWithVoice() {
+  if(!selectedVoiceId) { toast('请先选择一个音色','warn'); return; }
+  const fd = new FormData();
+  fd.append('voice_id', selectedVoiceId);
+  const r = await fetch(API+'/api/project/'+curProj+'/voice-clone', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(data.error) { toast(data.error,'error'); return; }
+  await refreshWork();
 }
 function showRecTab(tab) { document.getElementById('tab-clone').classList.toggle('active',tab==='clone');document.getElementById('tab-manual').classList.toggle('active',tab==='manual');document.getElementById('rec-clone').classList.toggle('hidden',tab!=='clone');document.getElementById('rec-manual').classList.toggle('hidden',tab!=='manual'); }
 let cloneChunks=[], cloneRecording=false;
@@ -1624,13 +1872,127 @@ async function toggleCloneRec() {
     const rec = new MediaRecorder(stream, {mimeType:'audio/webm;codecs=opus'});
     cloneChunks = [];
     rec.ondataavailable = e => { if(e.data.size>0) cloneChunks.push(e.data); };
-    rec.onstop = () => { cloneRecording=false; document.getElementById('clone-rec-btn').textContent='🎙 录制'; document.getElementById('clone-rec-btn').classList.remove('recording'); const blob=new Blob(cloneChunks,{type:'audio/webm'}); const p=document.getElementById('clone-player'); p.src=URL.createObjectURL(blob); p.style.display='block'; document.getElementById('clone-status').textContent='✓ 已录制'; document.getElementById('btn-clone-gen').disabled=false; window._cloneBlob=blob; };
+    rec.onstop = () => { cloneRecording=false; document.getElementById('clone-rec-btn').textContent='🎙 录制'; document.getElementById('clone-rec-btn').classList.remove('recording'); const blob=new Blob(cloneChunks,{type:'audio/webm'}); const p=document.getElementById('clone-player'); p.src=URL.createObjectURL(blob); p.style.display='block'; document.getElementById('clone-status').textContent='✓ 已录制'; document.getElementById('btn-clone-gen').disabled=false; document.getElementById('btn-save-voice').disabled=false; window._cloneBlob=blob; };
     rec.start(); cloneRecording=true; document.getElementById('clone-rec-btn').textContent='⏹ 停止'; document.getElementById('clone-rec-btn').classList.add('recording'); window._cloneRec=rec;
   } else { window._cloneRec.stop(); }
 }
-function onCloneFile(e) { const f=e.target.files[0]; if(!f) return; window._cloneBlob=f; const p=document.getElementById('clone-player'); p.src=URL.createObjectURL(f); p.style.display='block'; document.getElementById('clone-status').textContent='✓ '+f.name; document.getElementById('btn-clone-gen').disabled=false; }
+function onCloneFile(e) { const f=e.target.files[0]; if(!f) return; window._cloneBlob=f; const p=document.getElementById('clone-player'); p.src=URL.createObjectURL(f); p.style.display='block'; document.getElementById('clone-status').textContent='✓ '+f.name; document.getElementById('btn-clone-gen').disabled=false; document.getElementById('btn-save-voice').disabled=false; }
 async function startClone() { const b=window._cloneBlob; if(!b) { toast('请先录制或上传样本', 'warn'); return; } const fd=new FormData(); fd.append('sample',b,'voice_sample.wav'); fd.append('prompt_text',document.getElementById('clone-prompt')?.value||''); await fetch(API+'/api/project/'+curProj+'/voice-clone',{method:'POST',body:fd}); await refreshWork(); }
-async function acceptAllClones() { await fetch(API+'/api/project/'+curProj+'/accept-all-clones',{method:'POST'}); toast('已全部采用克隆音频','success'); await refreshWork(); }
+async function resumeClone() {
+  await fetch(API+'/api/project/'+curProj+'/resume-clone', {method:'POST'});
+  toast('正在恢复克隆...','info');
+  await refreshWork();
+}
+async function acceptAllClones() {
+  const r = await fetch(API+'/api/project/'+curProj+'/accept-all-clones', {method:'POST'});
+  const data = await r.json().catch(()=>({}));
+  if(data.error) { toast(data.error,'error'); return; }
+  toast(`已采纳 ${data.count||0} 句克隆录音`,'success');
+  await refreshWork();
+}
+
+async function abandonClones() {
+  if(!await showConfirm('放弃录音', '确定放弃所有克隆录音？此操作不可恢复。')) return;
+  await fetch(API+'/api/project/'+curProj+'/clear-clones', {method:'POST'});
+  clonedSet = new Set();
+  toast('已清除全部克隆录音','success');
+  document.getElementById('rec-clone').innerHTML = renderCloneRec();
+}
+async function switchVoiceHint() {
+  const ok = await showConfirm('换音色重新生成', '将删除所有现有克隆录音，请选择新的音色后重新生成。', '确认切换', '取消');
+  if(!ok) return;
+  await fetch(API+'/api/project/'+curProj+'/clear-clones', {method:'POST'});
+  clonedSet = new Set();
+  currentCloneVoiceId = '';
+  selectedVoiceId = '';
+  toast('已清除录音，请选择新音色','success');
+  document.getElementById('rec-clone').innerHTML = renderCloneRec();
+}
+
+function showSaveVoiceModal() {
+  if(!window._cloneBlob) { toast('请先录制或上传音色样本','warn'); return; }
+  // Play the sample first so user can hear it
+  const clonePlayer = document.getElementById('clone-player');
+  if(clonePlayer && clonePlayer.src) { clonePlayer.play(); }
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `<div class="modal" style="max-width:420px">
+    <h3>保存到音色库</h3>
+    <p style="margin:8px 0;color:#666;font-size:13px;line-height:1.6">当前录音样本正在播放中，请确认音色是否满意。</p>
+    <label style="display:block;margin:12px 0 4px;font-weight:500;font-size:13px">音色名称</label>
+    <input id="save-voice-name" type="text" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:14px" placeholder="例如：我的声音、磁性男声..." autofocus>
+    <div class="btn-row" style="margin-top:16px">
+      <button onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="primary" onclick="doSaveVoice()">保存音色</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  setTimeout(() => document.getElementById('save-voice-name')?.focus(), 100);
+}
+async function doSaveVoice() {
+  const name = document.getElementById('save-voice-name')?.value.trim();
+  if(!name) { toast('请输入音色名称','warn'); return; }
+  const b = window._cloneBlob;
+  if(!b) { toast('没有录音样本','error'); return; }
+  // Close modal immediately
+  const modal = document.querySelector('.modal-overlay');
+  if(modal) modal.remove();
+  // Upload sample + name
+  const fd = new FormData();
+  fd.append('sample', b, 'voice_sample.wav');
+  fd.append('name', name);
+  fd.append('prompt_text', document.getElementById('clone-prompt')?.value || '');
+  const r = await fetch(API+'/api/custom-voices', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(data.error) { toast(data.error,'error'); return; }
+  toast(`音色「${name}」已保存`,'success');
+  await loadVoiceLibrary();
+  document.getElementById('rec-clone').innerHTML = renderCloneRec();
+}
+function previewCustomVoice(voiceId) {
+  const player = document.getElementById('voice-preview-player');
+  player.src = API+'/api/custom-voices/'+voiceId+'/preview';
+  player.style.display = 'block';
+  player.play();
+}
+async function renameCustomVoice(voiceId, oldName) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.id = 'rename-modal';
+  modal.innerHTML = `<div class="modal" style="max-width:380px">
+    <h3>重命名音色</h3>
+    <input id="rename-voice-input" type="text" value="${escHtml(oldName)}" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:14px;margin-top:8px">
+    <div class="btn-row" style="margin-top:16px">
+      <button onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="primary" onclick="doRenameVoice('${voiceId}')">保存</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  setTimeout(() => { const inp = document.getElementById('rename-voice-input'); inp?.focus(); inp?.select(); }, 100);
+}
+async function doRenameVoice(voiceId) {
+  const name = document.getElementById('rename-voice-input')?.value.trim();
+  if(!name) { toast('名称不能为空','warn'); return; }
+  document.getElementById('rename-modal')?.remove();
+  const r = await fetch(API+'/api/custom-voices/'+voiceId+'/rename', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
+  });
+  const data = await r.json().catch(()=>({}));
+  if(data.error) { toast(data.error,'error'); return; }
+  toast('已重命名','success');
+  await loadVoiceLibrary();
+  document.getElementById('rec-clone').innerHTML = renderCloneRec();
+}
+async function deleteCustomVoice(voiceId, name) {
+  if(!await showConfirm('删除音色', `确定删除音色「${name}」？删除后无法恢复。`)) return;
+  const r = await fetch(API+'/api/custom-voices/'+voiceId, {method:'DELETE'});
+  const data = await r.json().catch(()=>({}));
+  if(data.error) { toast(data.error,'error'); return; }
+  toast(`已删除「${name}」`,'success');
+  await loadVoiceLibrary();
+  if(selectedVoiceId === voiceId) selectedVoiceId = '';
+  document.getElementById('rec-clone').innerHTML = renderCloneRec();
+}
 
 function recPrev() { if(curIdx>0){curIdx--;renderRecorder(document.getElementById('work-body'));} }
 function recNext() { if(curIdx<sentences.length-1){curIdx++;renderRecorder(document.getElementById('work-body'));} }
@@ -1801,7 +2163,7 @@ async function deleteCurProject() {
   const st = await (await fetch(API+'/api/project/'+curProj)).json();
   const busy = ['cloning','composing','processing'].includes(st.stage);
   if(busy) {
-    const ok = await showConfirm('警告：AI 任务运行中', `项目「${curProj}」正在${st.stage==='cloning'?'音色克隆':st.stage==='composing'?'视频合成':'转写处理'}中！\n\n删除将强制中断 AI 任务，所有已生成的数据将丢失。\n\n确定要删除吗？`);
+    const ok = await showConfirm('警告：AI 任务运行中', `项目「${curProj}」正在${st.stage==='cloning'?'克隆录音':st.stage==='composing'?'视频合成':'转写处理'}中！\n\n删除将强制中断 AI 任务，所有已生成的数据将丢失。\n\n确定要删除吗？`);
     if(!ok) return;
   } else {
     if(!await showConfirm('删除项目', `确定删除项目「${curProj}」？\n\n将删除该项目所有文件（视频、字幕、录音等），此操作不可撤销。`)) return;
@@ -1816,7 +2178,7 @@ async function resetProject() {
   const st = await (await fetch(API+'/api/project/'+curProj)).json();
   const busy = ['cloning','composing','processing'].includes(st.stage);
   if(busy) {
-    const ok = await showConfirm('警告：AI 任务运行中', `项目「${curProj}」正在${st.stage==='cloning'?'音色克隆':st.stage==='composing'?'视频合成':'转写处理'}中！\n\n清空数据将强制中断 AI 任务，所有进度将丢失。\n\n确定要清空吗？`);
+    const ok = await showConfirm('警告：AI 任务运行中', `项目「${curProj}」正在${st.stage==='cloning'?'克隆录音':st.stage==='composing'?'视频合成':'转写处理'}中！\n\n清空数据将强制中断 AI 任务，所有进度将丢失。\n\n确定要清空吗？`);
     if(!ok) return;
   } else {
     if(!await showConfirm('清除数据', `确定清空项目「${curProj}」的所有数据？\n\n将删除视频、字幕、录音等，保留空项目壳。此操作不可撤销。`)) return;
