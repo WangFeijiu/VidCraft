@@ -233,8 +233,12 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <h2 style="margin-bottom:0">格式转换</h2>
       <button onclick="show('v-empty')" style="font-size:13px;padding:6px 14px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer">返回</button>
     </div>
-    <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">
-      <video id="cv-video" controls style="width:100%;max-height:360px;display:block"></video>
+    <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden;min-height:200px;display:flex;align-items:center;justify-content:center" id="cv-video-wrap">
+      <video id="cv-video" controls style="width:100%;max-height:360px;display:none" onloadeddata="document.getElementById('cv-video').style.display='block';document.getElementById('cv-video-hint').style.display='none'"></video>
+      <div id="cv-video-hint" style="color:#888;text-align:center;padding:40px">
+        <div style="font-size:32px;margin-bottom:8px">🎬</div>
+        <p>请输入项目名以加载视频</p>
+      </div>
     </div>
     <div class="card">
       <p style="color:#888;margin-bottom:12px">将视频转换为其他格式或分辨率</p>
@@ -267,13 +271,17 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <h2 style="margin-bottom:0">视频编辑</h2>
       <button onclick="show('v-empty')" style="font-size:13px;padding:6px 14px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer">返回</button>
     </div>
-    <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">
-      <video id="ve-video" controls style="width:100%;max-height:360px;display:block"></video>
+    <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden;min-height:200px;display:flex;align-items:center;justify-content:center" id="ve-video-wrap">
+      <video id="ve-video" controls style="width:100%;max-height:360px;display:none" onloadeddata="document.getElementById('ve-video').style.display='block';document.getElementById('ve-video-hint').style.display='none'"></video>
+      <div id="ve-video-hint" style="color:#888;text-align:center;padding:40px">
+        <div style="font-size:32px;margin-bottom:8px">🎬</div>
+        <p>请输入项目名以加载视频</p>
+      </div>
     </div>
     <div class="card">
       <div class="tabs" style="margin-bottom:12px">
         <div class="tab active" onclick="showVETab('delete')" id="vet-tab-delete">删除片段</div>
-        <div class="tab" onclick="showVETab('insert-video')" id="vet-tab-insert-video">插入视频</div>
+        <div class="tab" onclick="showVETab('insert-video')" id="vet-tab-insert-video">插入片段</div>
         <div class="tab" onclick="showVETab('insert-images')" id="vet-tab-insert-images">插入图片</div>
         <div class="tab" onclick="showVETab('speedup')" id="vet-tab-speedup">变速剪辑</div>
       </div>
@@ -293,7 +301,7 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
         <input type="number" id="ve-ins-pos" style="width:120px" placeholder="0" min="0" step="0.1" value="0">
         <label style="display:block;margin:12px 0 4px">选择视频文件</label>
         <input type="file" id="ve-ins-file" accept="video/*,.avi,.mkv,.mov,.wmv,.flv,.webm,.ts" style="margin-bottom:8px">
-        <div class="btn-row"><button class="primary" onclick="veInsertVideo()">插入视频</button></div>
+        <div class="btn-row"><button class="primary" onclick="veInsertVideo()">插入片段</button></div>
       </div>
 
       <!-- Insert Images -->
@@ -2435,8 +2443,8 @@ function startI2VPoll() { clearInterval(i2vPollTimer); i2vPollTimer=setInterval(
 // Tools shared
 // ═══════════════════════════════════════════════════════════════
 function getToolProject(label) {
-  if(curProj) return curProj;
-  const name = prompt(`请输入要${label}的项目名：`);
+  const hint = projects.length ? `（可选：${projects.join('、')}）` : '';
+  const name = prompt(`请输入要${label}的项目名${hint}：`);
   if(!name) return null;
   if(!projects.includes(name)) { toast('项目不存在：'+name, 'error'); return null; }
   return name;
@@ -2535,7 +2543,7 @@ async function veInsertVideo() {
   const file = document.getElementById('ve-ins-file').files[0];
   if(!file) return toast('请选择视频文件', 'warn');
   lockTask(curProj, 've_insert');
-  updateTaskBar('插入视频中...', 30);
+  updateTaskBar('插入片段中...', 30);
   document.getElementById('ve-status').textContent = '处理中...';
   try {
     const fd = new FormData();

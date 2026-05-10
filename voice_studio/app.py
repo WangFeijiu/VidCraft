@@ -1354,7 +1354,7 @@ def api_ve_insert_video(name):
     f.save(str(tmp))
     _normalize_video(str(tmp), str(d / "insert_segment.mp4"))
     tmp.unlink(missing_ok=True)
-    save_state(name, stage="editing", msg="插入视频中...", sub="video_edit")
+    save_state(name, stage="editing", msg="插入片段中...", sub="video_edit")
     threading.Thread(target=_pipeline_ve_insert, args=(name, pos, "video"), daemon=True).start()
     return jsonify({"ok": True})
 
