@@ -239,8 +239,7 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <input type="file" id="cv-upload-file" accept="video/*" style="display:none" onchange="onToolUpload(this,'convert')">
       <button class="primary" onclick="document.getElementById('cv-upload-file').click()">选择视频</button>
     </div>
-    <div class="card" id="cv-video-area" style="margin-bottom:16px;padding:0;overflow:hidden;display:none;position:relative">
-      <span onclick="deleteToolVideo('convert')" style="position:absolute;top:8px;right:8px;cursor:pointer;background:rgba(0,0,0,0.6);color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;z-index:1" title="删除视频">🗑 删除</span>
+    <div class="card" id="cv-video-area" style="margin-bottom:16px;padding:0;overflow:hidden;display:none">
       <video id="cv-video" controls style="width:100%;max-height:360px;display:block"></video>
     </div>
     <div id="cv-reupload-bar" style="display:none;margin-bottom:12px;text-align:right">
@@ -284,8 +283,7 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <input type="file" id="ve-upload-file" accept="video/*" style="display:none" onchange="onToolUpload(this,'veditor')">
       <button class="primary" onclick="document.getElementById('ve-upload-file').click()">选择视频</button>
     </div>
-    <div class="card" id="ve-video-area" style="margin-bottom:16px;padding:0;overflow:hidden;display:none;position:relative">
-      <span onclick="deleteToolVideo('veditor')" style="position:absolute;top:8px;right:8px;cursor:pointer;background:rgba(0,0,0,0.6);color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;z-index:1" title="删除视频">🗑 删除</span>
+    <div class="card" id="ve-video-area" style="margin-bottom:16px;padding:0;overflow:hidden;display:none">
       <video id="ve-video" controls style="width:100%;max-height:360px;display:block"></video>
     </div>
     <div id="ve-reupload-bar" style="display:none;margin-bottom:12px;text-align:right">
