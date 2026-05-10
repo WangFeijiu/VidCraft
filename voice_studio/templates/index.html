@@ -2413,8 +2413,8 @@ function renderI2VNarration(body, st) {
       <div style="padding:10px;background:#fff;border-radius:6px;border:1px solid #ddd;color:#333;font-size:14px;line-height:1.6">大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-      <button id="i2v-voice-btn" onclick="toggleI2VVoice()">🎙 录制声纹</button>
-      <button onclick="document.getElementById('i2v-voice-file').click()">📁 上传声纹</button>
+      <button id="i2v-voice-btn" onclick="toggleI2VVoice()">🎙 录制声音</button>
+      <button onclick="document.getElementById('i2v-voice-file').click()">📁 上传声音文件</button>
       <input type="file" id="i2v-voice-file" accept="audio/*" style="display:none" onchange="onI2VVoiceFile(event)">
       <span id="i2v-voice-status" style="color:#888;font-size:13px">未录制将使用默认声纹</span>
     </div>
@@ -2438,7 +2438,7 @@ async function toggleI2VVoice() {
     rec.ondataavailable = e => { if(e.data.size>0) i2vVoiceChunks.push(e.data); };
     rec.onstop = () => {
       i2vVoiceRecording = false;
-      document.getElementById('i2v-voice-btn').textContent = '🎙 录制声纹';
+      document.getElementById('i2v-voice-btn').textContent = '🎙 录制声音';
       document.getElementById('i2v-voice-btn').classList.remove('recording');
       i2vVoiceBlob = new Blob(i2vVoiceChunks, {type:'audio/webm'});
       const p = document.getElementById('i2v-voice-player');

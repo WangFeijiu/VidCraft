@@ -1905,9 +1905,18 @@ def api_i2v_save_narration(name):
 
 @app.route("/api/img2vid/<name>/voice-sample", methods=["POST"])
 def api_i2v_voice(name):
-    f = request.files.get("sample")
-    if f:
-        f.save(str(i2v_path(name) / "voice_sample.wav"))
+    f = request.files.get("audio")
+    if not f:
+        return jsonify({"error": "请上传音频"}), 400
+    d = i2v_path(name)
+    raw = d / "_voice_raw.webm"
+    f.save(str(raw))
+    # Convert to standard 24kHz mono WAV for CosyVoice
+    subprocess.run([FFMPEG, "-y", "-i", str(raw),
+                    "-ar", "24000", "-ac", "1", "-f", "wav",
+                    str(d / "voice_sample.wav")],
+                   check=True, capture_output=True)
+    raw.unlink(missing_ok=True)
     return jsonify({"ok": True})
 
 @app.route("/api/img2vid/<name>/generate", methods=["POST"])
