@@ -289,6 +289,7 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
         <div class="tab" onclick="showVETab('insert-video')" id="vet-tab-insert-video">插入片段</div>
         <div class="tab" onclick="showVETab('insert-images')" id="vet-tab-insert-images">插入图片</div>
         <div class="tab" onclick="showVETab('speedup')" id="vet-tab-speedup">变速剪辑</div>
+        <div class="tab" onclick="showVETab('replace-audio')" id="vet-tab-replace-audio">音频替换</div>
       </div>
 
       <!-- Delete -->
@@ -349,6 +350,29 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
             <div style="margin-top:8px"><button class="primary" onclick="veSpeedMerge()">合成视频</button></div>
           </div>
         </div>
+      </div>
+
+      <!-- Replace Audio -->
+      <div id="vet-replace-audio" class="hidden">
+        <p style="color:#888;margin-bottom:8px">指定时间段，用新录制的音频替换原视频音频</p>
+        <div style="display:flex;gap:12px;align-items:center;margin:8px 0">
+          <label>起始（秒）<input type="number" id="ve-rep-start" style="width:80px;margin-left:4px" placeholder="0" min="0" step="0.1" value="0"></label>
+          <label>结束（秒）<input type="number" id="ve-rep-end" style="width:80px;margin-left:4px" placeholder="10" min="0" step="0.1" value="10"></label>
+        </div>
+        <div style="margin-top:12px;padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee">
+          <p style="color:#888;margin-bottom:8px">录制或上传新音频：</p>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+            <button id="ve-rep-rec-btn" class="primary" onclick="veReplaceRecord()">🎙 开始录音</button>
+            <span style="color:#888">或</span>
+            <input type="file" id="ve-rep-file" accept="audio/*" style="display:none" onchange="onReplaceAudioFile(this)">
+            <button onclick="document.getElementById('ve-rep-file').click()">📁 上传音频</button>
+            <span id="ve-rep-rec-status" style="color:#888;font-size:13px"></span>
+          </div>
+          <div id="ve-rep-player" style="display:none">
+            <audio id="ve-rep-audio" controls style="width:100%"></audio>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px"><button class="primary" onclick="veReplaceAudio()">替换音频</button></div>
       </div>
 
       <div id="ve-status" style="margin-top:12px;color:#888;font-size:13px"></div>
@@ -2544,7 +2568,7 @@ function showVEditor() {
   show('v-veditor');
 }
 function showVETab(tab) {
-  ['delete','insert-video','insert-images','speedup'].forEach(t => {
+  ['delete','insert-video','insert-images','speedup','replace-audio'].forEach(t => {
     document.getElementById('vet-tab-'+t).classList.toggle('active', t===tab);
     document.getElementById('vet-'+t).classList.toggle('hidden', t!==tab);
   });
@@ -2770,6 +2794,87 @@ async function veSpeedMerge() {
     }, 2000);
   } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
 }
+// ═══════════════════════════════════════════════════════════════
+// Replace Audio
+// ═══════════════════════════════════════════════════════════════
+let replaceRecBlob = null;
+let replaceRecorder = null;
+
+async function veReplaceRecord() {
+  const btn = document.getElementById('ve-rep-rec-btn');
+  const status = document.getElementById('ve-rep-rec-status');
+  if(replaceRecorder && replaceRecorder.state === 'recording') {
+    replaceRecorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    replaceRecorder = new MediaRecorder(stream);
+    const chunks = [];
+    replaceRecorder.ondataavailable = e => chunks.push(e.data);
+    replaceRecorder.onstop = () => {
+      stream.getTracks().forEach(t=>t.stop());
+      replaceRecBlob = new Blob(chunks, {type:'audio/webm'});
+      const audio = document.getElementById('ve-rep-audio');
+      audio.src = URL.createObjectURL(replaceRecBlob);
+      document.getElementById('ve-rep-player').style.display = 'block';
+      btn.textContent = '🎙 重新录音';
+      status.textContent = '录音完成';
+    };
+    replaceRecorder.start();
+    btn.textContent = '⏹ 停止录音';
+    status.textContent = '录音中...';
+  } catch(e) { toast('无法录音: '+e.message, 'info'); }
+}
+
+function onReplaceAudioFile(input) {
+  const file = input.files[0];
+  if(!file) return;
+  replaceRecBlob = file;
+  const audio = document.getElementById('ve-rep-audio');
+  audio.src = URL.createObjectURL(file);
+  document.getElementById('ve-rep-player').style.display = 'block';
+  document.getElementById('ve-rep-rec-status').textContent = '已选择: ' + file.name;
+}
+
+async function veReplaceAudio() {
+  if(!toolSid) return toast('请先上传视频', 'warn');
+  if(!replaceRecBlob) return toast('请先录制或上传音频', 'warn');
+  if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
+  const start = parseFloat(document.getElementById('ve-rep-start').value);
+  const end = parseFloat(document.getElementById('ve-rep-end').value);
+  if(isNaN(start)||isNaN(end)) return toast('请填写完整时间段', 'warn');
+  if(end <= start) return toast('结束时间需大于起始时间', 'warn');
+
+  lockTask(toolSid, 've_replace_audio');
+  updateTaskBar('替换音频中...', 30);
+  document.getElementById('ve-status').textContent = '处理中...';
+  try {
+    const fd = new FormData();
+    fd.append('audio', replaceRecBlob, 'audio.webm');
+    fd.append('start', start);
+    fd.append('end', end);
+    const r = await fetch(API+'/api/tool/'+toolSid+'/edit/replace-audio', {method:'POST', body:fd});
+    const data = await r.json();
+    if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
+    const pollId = setInterval(async()=>{
+      const st = await(await fetch(API+'/api/tool/'+toolSid+'/state')).json();
+      if(st.stage==='done') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 音频替换完成！</span>';
+        document.getElementById('ve-download-btn').classList.remove('hidden');
+        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        updateTaskBar('完成', 100);
+        setTimeout(()=>unlockTask(), 1500);
+      } else if(st.stage==='error') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg||'替换失败')+'</span>';
+        unlockTask();
+      }
+    }, 2000);
+  } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
+}
+
 // ═══════════════════════════════════════════════════════════════
 function fmtS(s) { if(!s&&s!==0) return '?'; const m=Math.floor(s/60),sec=Math.floor(s%60); return m+':'+(sec<10?'0':'')+sec; }
 function escHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
