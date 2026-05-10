@@ -541,7 +541,7 @@ def api_match_subtitles(name):
     return jsonify({"ok": True, "async": True})
 
 def _pipeline_match(name, user_text):
-    """Simple time-based matching: distribute user subtitles evenly across original timeline."""
+    """Sliding window semantic matching with LLM."""
     try:
         d = pd(name)
         if (d / "sentences_optimized.json").exists():
@@ -555,52 +555,121 @@ def _pipeline_match(name, user_text):
         if total_orig == 0:
             raise ValueError("原始字幕为空")
 
-        total_duration = sentences[-1]["end"] if sentences else 0.0
+        WINDOW_SIZE = 10
+        result_map = {}  # user_idx -> {start, end, orig_start, orig_end}
+
+        orig_cursor = 0
+        user_cursor = 0
+
+        while user_cursor < total_user:
+            # Take 10 user subtitles
+            user_end = min(user_cursor + WINDOW_SIZE, total_user)
+            user_window = user_text[user_cursor:user_end]
+
+            # Take 10-15 original subtitles (with buffer for splits/merges)
+            orig_end = min(orig_cursor + WINDOW_SIZE + 5, total_orig)
+            orig_window = sentences[orig_cursor:orig_end]
+
+            socketio.emit('match_progress', {
+                'project': name,
+                'msg': f'匹配中... {user_end}/{total_user} 句',
+                'progress': int((user_end / total_user) * 90)
+            }, namespace='/')
+
+            # Build prompt for LLM
+            orig_lines = "\n".join(
+                f"[{orig_cursor + i}] {s['text'][:50]}"
+                for i, s in enumerate(orig_window)
+            )
+            user_lines = "\n".join(
+                f"[{user_cursor + i}] {t[:50]}"
+                for i, t in enumerate(user_window)
+            )
+
+            prompt = (
+                f"原始字幕（序号{orig_cursor}-{orig_end-1}）：\n{orig_lines}\n\n"
+                f"上传字幕（序号{user_cursor}-{user_end-1}）：\n{user_lines}\n\n"
+                "请匹配每句上传字幕对应的原始字幕区间。\n"
+                "输出格式：`上传序号:原始起始-原始结束`（一行一个）\n"
+                "例如：\n"
+                "0:0-2  （上传第0句对应原始0-2句，合并）\n"
+                "1:3-3  （上传第1句对应原始第3句）\n"
+                "2:4-4  （上传第2句对应原始第4句，拆分1/2）\n"
+                "3:4-4  （上传第3句对应原始第4句，拆分2/2）\n\n"
+                "规则：\n"
+                "1. 序号使用全局序号（不是窗口内序号）\n"
+                "2. 如果原始某句被拆分，多个上传句可以引用同一原始句\n"
+                "3. 只输出匹配结果，不要解释"
+            )
+
+            resp = call_llm(prompt, system="你是字幕匹配专家，只输出匹配结果。", max_tokens=4000)
+
+            # Parse results
+            max_orig_matched = orig_cursor - 1
+            for line in resp.strip().split("\n"):
+                line = line.strip()
+                if not line or ":" not in line:
+                    continue
+                try:
+                    user_idx_str, range_str = line.split(":", 1)
+                    user_idx = int(user_idx_str.strip())
+                    orig_s, orig_e = range_str.strip().split("-", 1)
+                    orig_start = int(orig_s.strip())
+                    orig_end = int(orig_e.strip())
+
+                    if 0 <= orig_start <= orig_end < total_orig and 0 <= user_idx < total_user:
+                        result_map[user_idx] = {
+                            "start": sentences[orig_start]["start"],
+                            "end": sentences[orig_end]["end"],
+                            "orig_start": orig_start,
+                            "orig_end": orig_end,
+                        }
+                        max_orig_matched = max(max_orig_matched, orig_end)
+                except Exception as e:
+                    print(f"Parse error on line '{line}': {e}")
+                    continue
+
+            # Move cursors
+            orig_cursor = max_orig_matched + 1
+            user_cursor = user_end
 
         socketio.emit('match_progress', {
             'project': name,
-            'msg': f'正在分配时间戳...',
-            'progress': 50
-        }, namespace='/')
-
-        # Simple sequential mapping
-        final = []
-        for i, text in enumerate(user_text):
-            # Calculate time range for this user subtitle
-            time_start = (i / total_user) * total_duration
-            time_end = ((i + 1) / total_user) * total_duration
-
-            # Find which original subtitle(s) overlap with this time range
-            overlapping = []
-            for j, s in enumerate(sentences):
-                if s["start"] < time_end and s["end"] > time_start:
-                    overlapping.append(j + 1)  # 1-based
-
-            if not overlapping:
-                # Fallback to proportional index
-                orig_idx = int(i / total_user * total_orig)
-                overlapping = [min(orig_idx + 1, total_orig)]
-
-            final.append({
-                "text": text,
-                "start": time_start,
-                "end": time_end,
-                "source": overlapping
-            })
-
-            if (i + 1) % 20 == 0:
-                progress = 50 + int((i + 1) / total_user * 40)
-                socketio.emit('match_progress', {
-                    'project': name,
-                    'msg': f'已处理 {i+1}/{total_user} 句',
-                    'progress': progress
-                }, namespace='/')
-
-        socketio.emit('match_progress', {
-            'project': name,
-            'msg': '保存结果中...',
+            'msg': '整合结果中...',
             'progress': 95
         }, namespace='/')
+
+        # Build final result
+        final = []
+        for i in range(total_user):
+            if i in result_map:
+                r = result_map[i]
+                final.append({
+                    "text": user_text[i],
+                    "start": r["start"],
+                    "end": r["end"],
+                    "source": list(range(r["orig_start"]+1, r["orig_end"]+2))  # 1-based
+                })
+            else:
+                # Fallback: interpolate
+                prev_end = 0.0
+                next_start = sentences[-1]["end"] if sentences else 0.0
+                for j in range(i - 1, -1, -1):
+                    if j in result_map:
+                        prev_end = result_map[j]["end"]
+                        break
+                for j in range(i + 1, total_user):
+                    if j in result_map:
+                        next_start = result_map[j]["start"]
+                        break
+                est_start = (prev_end + next_start) / 2
+                est_end = est_start + 1.0
+                final.append({
+                    "text": user_text[i],
+                    "start": est_start,
+                    "end": est_end,
+                    "source": []
+                })
 
         (pd(name) / "sentences_uploaded.json").write_text(json.dumps(final, ensure_ascii=False, indent=2), "utf-8")
 

@@ -1048,11 +1048,14 @@ function showPreview(title, oldS, newS) {
 
     let lastMatchedOld = 0;
     let rowCount = 0;
+    const displayedOrig = new Set();  // Track which original sentences have been displayed
+
     limitedNewS.forEach((nw, newIdx) => {
       if(newIdx % 20 === 0) console.log('[showPreview] processing newIdx:', newIdx);
       const sources = nw.source && nw.source.length > 0 ? nw.source : [newIdx+1];
       const isMerge = sources.length > 1;
       const isSplit = sources.length === 1 && oldRefCount.get(sources[0]) > 1;
+      const isRepeat = sources.length === 1 && displayedOrig.has(sources[0]);
 
       // Show unmatched old sentences before this new sentence
       const minSource = Math.min(...sources);
@@ -1081,15 +1084,29 @@ function showPreview(title, oldS, newS) {
       const row = document.createElement('div');
       row.style.cssText = 'display:grid;grid-template-columns:1fr 40px 1fr;gap:12px;margin-bottom:16px;align-items:center';
 
-      // Left: original sentences
+      // Left: original sentences (or "same as above" for splits)
       let leftHtml = '<div>';
-      sources.forEach((oldIdx, i) => {
-        const oldText = (oldS[oldIdx-1]?.text || '').substring(0, 100);
-        leftHtml += `<div style="padding:6px 10px;background:#f9f9f9;border-radius:4px;margin-bottom:${i<sources.length-1?'4px':'0'}">
-          <div style="font-size:11px;color:#aaa">${oldIdx}.</div>
-          <div style="font-size:13px;color:#666;text-decoration:line-through">${escHtml(oldText)}</div>
+      if(isRepeat) {
+        // This is a split - show which part
+        const splitIndex = Array.from(limitedNewS.slice(0, newIdx + 1))
+          .filter(s => s.source && s.source[0] === sources[0])
+          .length;
+        const totalSplits = oldRefCount.get(sources[0]);
+        leftHtml += `<div style="padding:6px 10px;background:#e7f3ff;border-radius:4px;border-left:3px solid #17a2b8">
+          <div style="font-size:11px;color:#aaa">${sources[0]}.</div>
+          <div style="font-size:12px;color:#0c5460;font-style:italic">（同上，拆分 ${splitIndex}/${totalSplits}）</div>
         </div>`;
-      });
+      } else {
+        sources.forEach((oldIdx, i) => {
+          const oldText = (oldS[oldIdx-1]?.text || '').substring(0, 100);
+          const splitTag = isSplit ? ` <span style="color:#17a2b8;font-size:10px">[拆${oldRefCount.get(oldIdx)}句]</span>` : '';
+          leftHtml += `<div style="padding:6px 10px;background:#f9f9f9;border-radius:4px;margin-bottom:${i<sources.length-1?'4px':'0'}">
+            <div style="font-size:11px;color:#aaa">${oldIdx}.${splitTag}</div>
+            <div style="font-size:13px;color:#666;text-decoration:line-through">${escHtml(oldText)}</div>
+          </div>`;
+          displayedOrig.add(oldIdx);
+        });
+      }
       leftHtml += '</div>';
 
       // Middle: arrow
