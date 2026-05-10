@@ -233,14 +233,16 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <h2 style="margin-bottom:0">格式转换</h2>
       <button onclick="show('v-empty')" style="font-size:13px;padding:6px 14px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer">返回</button>
     </div>
-    <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden;min-height:200px;display:flex;align-items:center;justify-content:center" id="cv-video-wrap">
-      <video id="cv-video" controls style="width:100%;max-height:360px;display:none" onloadeddata="document.getElementById('cv-video').style.display='block';document.getElementById('cv-video-hint').style.display='none'"></video>
-      <div id="cv-video-hint" style="color:#888;text-align:center;padding:40px">
-        <div style="font-size:32px;margin-bottom:8px">🎬</div>
-        <p>请输入项目名以加载视频</p>
-      </div>
+    <div class="card" id="cv-upload-area" style="margin-bottom:16px;text-align:center;padding:48px">
+      <div style="font-size:48px;margin-bottom:12px">📁</div>
+      <p style="color:#888;margin-bottom:16px">请上传要处理的视频文件</p>
+      <input type="file" id="cv-upload-file" accept="video/*" style="display:none" onchange="onToolUpload(this,'convert')">
+      <button class="primary" onclick="document.getElementById('cv-upload-file').click()">选择视频</button>
     </div>
-    <div class="card">
+    <div class="card" id="cv-video-area" style="margin-bottom:16px;padding:0;overflow:hidden;display:none">
+      <video id="cv-video" controls style="width:100%;max-height:360px;display:block"></video>
+    </div>
+    <div class="card" id="cv-op-area" style="display:none">
       <p style="color:#888;margin-bottom:12px">将视频转换为其他格式或分辨率</p>
       <label style="display:block;margin:8px 0 4px;font-weight:500">输出格式</label>
       <select id="cv-format" style="width:100%">
@@ -261,6 +263,7 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <div id="cv-status" style="margin-top:12px;color:#888;font-size:13px"></div>
       <div class="btn-row" style="margin-top:16px">
         <button class="primary" onclick="startConvert()">开始转换</button>
+        <button id="cv-download-btn" class="hidden" onclick="downloadToolResult('convert')">⬇ 下载结果</button>
       </div>
     </div>
   </div>
@@ -271,14 +274,16 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <h2 style="margin-bottom:0">视频编辑</h2>
       <button onclick="show('v-empty')" style="font-size:13px;padding:6px 14px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer">返回</button>
     </div>
-    <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden;min-height:200px;display:flex;align-items:center;justify-content:center" id="ve-video-wrap">
-      <video id="ve-video" controls style="width:100%;max-height:360px;display:none" onloadeddata="document.getElementById('ve-video').style.display='block';document.getElementById('ve-video-hint').style.display='none'"></video>
-      <div id="ve-video-hint" style="color:#888;text-align:center;padding:40px">
-        <div style="font-size:32px;margin-bottom:8px">🎬</div>
-        <p>请输入项目名以加载视频</p>
-      </div>
+    <div class="card" id="ve-upload-area" style="margin-bottom:16px;text-align:center;padding:48px">
+      <div style="font-size:48px;margin-bottom:12px">📁</div>
+      <p style="color:#888;margin-bottom:16px">请上传要编辑的视频文件</p>
+      <input type="file" id="ve-upload-file" accept="video/*" style="display:none" onchange="onToolUpload(this,'veditor')">
+      <button class="primary" onclick="document.getElementById('ve-upload-file').click()">选择视频</button>
     </div>
-    <div class="card">
+    <div class="card" id="ve-video-area" style="margin-bottom:16px;padding:0;overflow:hidden;display:none">
+      <video id="ve-video" controls style="width:100%;max-height:360px;display:block"></video>
+    </div>
+    <div class="card" id="ve-op-area" style="display:none">
       <div class="tabs" style="margin-bottom:12px">
         <div class="tab active" onclick="showVETab('delete')" id="vet-tab-delete">删除片段</div>
         <div class="tab" onclick="showVETab('insert-video')" id="vet-tab-insert-video">插入片段</div>
@@ -347,6 +352,9 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       </div>
 
       <div id="ve-status" style="margin-top:12px;color:#888;font-size:13px"></div>
+      <div class="btn-row" style="margin-top:12px">
+        <button id="ve-download-btn" class="hidden" onclick="downloadToolResult()">⬇ 下载结果</button>
+      </div>
     </div>
   </div>
 
@@ -2440,53 +2448,82 @@ function startI2VPoll() { clearInterval(i2vPollTimer); i2vPollTimer=setInterval(
 },2000); }
 
 // ═══════════════════════════════════════════════════════════════
-// Tools shared
+// Tools — independent upload workflow
 // ═══════════════════════════════════════════════════════════════
-function getToolProject(label) {
-  const hint = projects.length ? `（可选：${projects.join('、')}）` : '';
-  const name = prompt(`请输入要${label}的项目名${hint}：`);
-  if(!name) return null;
-  if(!projects.includes(name)) { toast('项目不存在：'+name, 'error'); return null; }
-  return name;
+let toolSid = null;
+
+async function onToolUpload(input, tool) {
+  const file = input.files[0];
+  if(!file) return;
+  const fd = new FormData();
+  fd.append('video', file);
+  try {
+    const r = await fetch(API+'/api/tool/upload', {method:'POST', body:fd});
+    const data = await r.json();
+    if(data.error) { toast(data.error, 'error'); return; }
+    toolSid = data.session_id;
+    if(tool === 'convert') {
+      document.getElementById('cv-upload-area').style.display = 'none';
+      document.getElementById('cv-video-area').style.display = 'block';
+      document.getElementById('cv-op-area').style.display = 'block';
+      document.getElementById('cv-video').src = API + '/api/tool/' + toolSid + '/video';
+      document.getElementById('cv-download-btn').classList.add('hidden');
+      document.getElementById('cv-status').textContent = '';
+    } else {
+      document.getElementById('ve-upload-area').style.display = 'none';
+      document.getElementById('ve-video-area').style.display = 'block';
+      document.getElementById('ve-op-area').style.display = 'block';
+      document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video';
+      document.getElementById('ve-download-btn').classList.add('hidden');
+      document.getElementById('ve-status').textContent = '';
+    }
+    toast('视频上传成功', 'success');
+  } catch(e) { toast('上传失败: '+e.message, 'error'); }
+}
+function downloadToolResult() {
+  if(!toolSid) return;
+  window.location.href = API + '/api/tool/' + toolSid + '/download';
 }
 
 // ═══════════════════════════════════════════════════════════════
 // Video Format Conversion
 // ═══════════════════════════════════════════════════════════════
 function showConvert() {
-  const sel = getToolProject('格式转换');
-  if(!sel) return;
-  curProj = sel;
-  refreshProjects();
+  toolSid = null;
+  document.getElementById('cv-upload-area').style.display = 'block';
+  document.getElementById('cv-video-area').style.display = 'none';
+  document.getElementById('cv-op-area').style.display = 'none';
+  document.getElementById('cv-video').src = '';
   document.getElementById('cv-status').textContent = '';
-  document.getElementById('cv-video').src = API + '/api/project/' + curProj + '/video';
+  document.getElementById('cv-download-btn').classList.add('hidden');
   show('v-convert');
 }
 async function startConvert() {
+  if(!toolSid) return toast('请先上传视频', 'warn');
   if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
   const fmt = document.getElementById('cv-format').value;
   const res = document.getElementById('cv-res').value;
-  lockTask(curProj, 'convert');
+  lockTask(toolSid, 'convert');
   updateTaskBar('格式转换中...', 30);
   document.getElementById('cv-status').textContent = '处理中...';
   try {
-    const r = await fetch(API+'/api/project/'+curProj+'/convert', {
+    const r = await fetch(API+'/api/tool/'+toolSid+'/convert', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({format:fmt, resolution:res})
     });
     const data = await safeJSON(r);
     if(data.error) { toast(data.error, 'error'); unlockTask(); return; }
-    // Poll until done
     const pollId = setInterval(async()=>{
-      const st = await(await fetch(API+'/api/project/'+curProj)).json();
+      const st = await(await fetch(API+'/api/tool/'+toolSid+'/state')).json();
       if(st.stage==='done') {
         clearInterval(pollId);
         document.getElementById('cv-status').innerHTML = '<span style="color:#2a9d3f">转换完成！</span>';
+        document.getElementById('cv-download-btn').classList.remove('hidden');
         updateTaskBar('完成', 100);
         setTimeout(()=>unlockTask(), 1500);
       } else if(st.stage==='error') {
         clearInterval(pollId);
-        document.getElementById('cv-status').innerHTML = '<span style="color:#d9534f">'+st.msg.split('\\n')[0]+'</span>';
+        document.getElementById('cv-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg||'转换失败')+'</span>';
         unlockTask();
       }
     }, 2000);
@@ -2497,15 +2534,15 @@ async function startConvert() {
 // Video Editor
 // ═══════════════════════════════════════════════════════════════
 function showVEditor() {
-  const sel = getToolProject('视频编辑');
-  if(!sel) return;
-  curProj = sel;
-  refreshProjects();
+  toolSid = null;
+  document.getElementById('ve-upload-area').style.display = 'block';
+  document.getElementById('ve-video-area').style.display = 'none';
+  document.getElementById('ve-op-area').style.display = 'none';
+  document.getElementById('ve-video').src = '';
   document.getElementById('ve-status').textContent = '';
-  document.getElementById('ve-video').src = API + '/api/project/' + curProj + '/video';
+  document.getElementById('ve-download-btn').classList.add('hidden');
   show('v-veditor');
 }
-function closeVEditor() { show('v-empty'); }
 function showVETab(tab) {
   ['delete','insert-video','insert-images','speedup'].forEach(t => {
     document.getElementById('vet-tab-'+t).classList.toggle('active', t===tab);
@@ -2514,62 +2551,83 @@ function showVETab(tab) {
 }
 
 async function veDelete() {
-  if(isTaskBusy() && !checkTaskConflict(curProj,'ve')) {
-    return toast('请等待另一个任务处理完成后再执行', 'warn');
-  }
+  if(!toolSid) return toast('请先上传视频', 'warn');
+  if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
   const ranges = document.getElementById('ve-ranges').value;
   if(!ranges.trim()) return toast('请输入要删除的时间段', 'warn');
-  lockTask(curProj, 've_delete');
+  lockTask(toolSid, 've_delete');
   updateTaskBar('视频裁剪中...', 30);
   document.getElementById('ve-status').textContent = '处理中...';
   try {
-    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/delete', {
+    const r = await fetch(API+'/api/tool/'+toolSid+'/edit/delete', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ranges})
     });
     const data = await r.json();
     if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
-    document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 裁剪完成！原视频已备份为 input_backup.mp4</span>';
-    updateTaskBar('完成', 100);
-    setTimeout(() => unlockTask(), 1500);
+    const pollId = setInterval(async()=>{
+      const st = await(await fetch(API+'/api/tool/'+toolSid+'/state')).json();
+      if(st.stage==='done') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 裁剪完成！</span>';
+        document.getElementById('ve-download-btn').classList.remove('hidden');
+        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        updateTaskBar('完成', 100);
+        setTimeout(()=>unlockTask(), 1500);
+      } else if(st.stage==='error') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg||'裁剪失败')+'</span>';
+        unlockTask();
+      }
+    }, 2000);
   } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
 }
 
 async function veInsertVideo() {
-  if(isTaskBusy() && !checkTaskConflict(curProj,'ve')) {
-    return toast('请等待另一个任务处理完成后再执行', 'warn');
-  }
+  if(!toolSid) return toast('请先上传视频', 'warn');
+  if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
   const pos = parseFloat(document.getElementById('ve-ins-pos').value) || 0;
   const file = document.getElementById('ve-ins-file').files[0];
   if(!file) return toast('请选择视频文件', 'warn');
-  lockTask(curProj, 've_insert');
+  lockTask(toolSid, 've_insert');
   updateTaskBar('插入片段中...', 30);
   document.getElementById('ve-status').textContent = '处理中...';
   try {
     const fd = new FormData();
-    fd.append('video', file);
+    fd.append('segment', file);
     fd.append('position', pos);
-    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/insert-video', {method:'POST', body:fd});
+    const r = await fetch(API+'/api/tool/'+toolSid+'/edit/insert-video', {method:'POST', body:fd});
     const data = await r.json();
     if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
-    document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 插入完成！</span>';
-    updateTaskBar('完成', 100);
-    setTimeout(() => unlockTask(), 1500);
+    const pollId = setInterval(async()=>{
+      const st = await(await fetch(API+'/api/tool/'+toolSid+'/state')).json();
+      if(st.stage==='done') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 插入完成！</span>';
+        document.getElementById('ve-download-btn').classList.remove('hidden');
+        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        updateTaskBar('完成', 100);
+        setTimeout(()=>unlockTask(), 1500);
+      } else if(st.stage==='error') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg||'插入失败')+'</span>';
+        unlockTask();
+      }
+    }, 2000);
   } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
 }
 
 async function veInsertImages() {
-  if(isTaskBusy() && !checkTaskConflict(curProj,'ve')) {
-    return toast('请等待另一个任务处理完成后再执行', 'warn');
-  }
+  if(!toolSid) return toast('请先上传视频', 'warn');
+  if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
   const pos = parseFloat(document.getElementById('ve-img-pos').value) || 0;
   const files = document.getElementById('ve-img-files').files;
   if(!files.length) return toast('请选择图片', 'warn');
   const subsText = document.getElementById('ve-img-subs').value;
   const subs = subsText.split('\n').map(l=>l.trim()).filter(Boolean);
-  if(subs.length !== files.length) return toast(`图片数量(${files.length}, 'warn')和字幕行数(${subs.length})不匹配`);
+  if(subs.length !== files.length) return toast(`图片数量(${files.length})和字幕行数(${subs.length})不匹配`, 'warn');
 
-  lockTask(curProj, 've_insert');
+  lockTask(toolSid, 've_insert');
   updateTaskBar('生成图片视频并插入中...', 10);
   document.getElementById('ve-status').textContent = '处理中，可能需要几分钟...';
 
@@ -2578,12 +2636,24 @@ async function veInsertImages() {
     fd.append('position', pos);
     fd.append('subtitles', JSON.stringify(subs));
     Array.from(files).forEach((f,i) => fd.append(`image_${i}`, f));
-    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/insert-images', {method:'POST', body:fd});
+    const r = await fetch(API+'/api/tool/'+toolSid+'/edit/insert-images', {method:'POST', body:fd});
     const data = await r.json();
     if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
-    document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 插入完成！</span>';
-    updateTaskBar('完成', 100);
-    setTimeout(() => unlockTask(), 1500);
+    const pollId = setInterval(async()=>{
+      const st = await(await fetch(API+'/api/tool/'+toolSid+'/state')).json();
+      if(st.stage==='done') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 插入完成！</span>';
+        document.getElementById('ve-download-btn').classList.remove('hidden');
+        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        updateTaskBar('完成', 100);
+        setTimeout(()=>unlockTask(), 1500);
+      } else if(st.stage==='error') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg||'插入失败')+'</span>';
+        unlockTask();
+      }
+    }, 2000);
   } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
 }
 
@@ -2604,6 +2674,7 @@ document.getElementById('ve-speed-end').addEventListener('input', updateSpeedPre
 document.getElementById('ve-speed-rate').addEventListener('change', updateSpeedPreview);
 
 async function veSpeedUp() {
+  if(!toolSid) return toast('请先上传视频', 'warn');
   if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
   const start = parseFloat(document.getElementById('ve-speed-start').value);
   const end = parseFloat(document.getElementById('ve-speed-end').value);
@@ -2611,28 +2682,29 @@ async function veSpeedUp() {
   if(isNaN(start)||isNaN(end)||isNaN(rate)) return toast('请填写完整参数', 'warn');
   if(end <= start) return toast('结束时间需大于起始时间', 'warn');
   if(rate <= 1) return toast('倍速需大于1', 'warn');
-  lockTask(curProj, 've_delete');
+  lockTask(toolSid, 've_speedup');
   updateTaskBar('视频变速处理中...', 30);
   document.getElementById('ve-status').textContent = '处理中...';
   try {
-    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/speedup', {
+    const r = await fetch(API+'/api/tool/'+toolSid+'/edit/speedup', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({start, end, rate})
     });
     const data = await r.json();
     if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
-    // Poll until done
     const pollSpeed = setInterval(async()=>{
-      const st = await(await fetch(API+'/api/project/'+curProj)).json();
-      if(st.stage==='editing' && st.msg && st.msg.includes('变速')) {
+      const st = await(await fetch(API+'/api/tool/'+toolSid+'/state')).json();
+      if(st.stage==='done') {
         clearInterval(pollSpeed);
         document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 变速完成！请录制新音频</span>';
         document.getElementById('ve-speed-record').classList.remove('hidden');
+        document.getElementById('ve-download-btn').classList.remove('hidden');
+        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
         updateTaskBar('完成', 100);
         setTimeout(()=>unlockTask(), 1500);
       } else if(st.stage==='error') {
         clearInterval(pollSpeed);
-        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg)+'</span>';
+        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg||'变速失败')+'</span>';
         unlockTask();
       }
     }, 2000);
@@ -2668,28 +2740,31 @@ async function veSpeedRecord() {
 
 async function veSpeedMerge() {
   if(!speedRecBlob) return toast('请先录音', 'warn');
+  if(!toolSid) return toast('请先上传视频', 'warn');
   if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
-  lockTask(curProj, 've_insert');
+  lockTask(toolSid, 've_merge');
   updateTaskBar('合成视频中...', 50);
   document.getElementById('ve-status').textContent = '合成中...';
   try {
     const fd = new FormData();
     fd.append('audio', speedRecBlob, 'audio.webm');
-    const r = await fetch(API+'/api/project/'+curProj+'/video-edit/speedup-merge', {method:'POST', body:fd});
+    const r = await fetch(API+'/api/tool/'+toolSid+'/edit/speedup-merge', {method:'POST', body:fd});
     const data = await r.json();
     if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
     const pollMerge = setInterval(async()=>{
-      const st = await(await fetch(API+'/api/project/'+curProj)).json();
-      if(st.stage==='editing' && st.msg && st.msg.includes('合成完成')) {
+      const st = await(await fetch(API+'/api/tool/'+toolSid+'/state')).json();
+      if(st.stage==='done') {
         clearInterval(pollMerge);
         document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 合成完成！视频已更新</span>';
         document.getElementById('ve-speed-record').classList.add('hidden');
+        document.getElementById('ve-download-btn').classList.remove('hidden');
         speedRecBlob = null;
+        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
         updateTaskBar('完成', 100);
         setTimeout(()=>unlockTask(), 1500);
       } else if(st.stage==='error') {
         clearInterval(pollMerge);
-        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg)+'</span>';
+        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg||'合成失败')+'</span>';
         unlockTask();
       }
     }, 2000);

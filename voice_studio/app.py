@@ -2250,6 +2250,36 @@ def api_tool_convert(sid):
     threading.Thread(target=_pipeline_tool_convert, args=(sid, fmt, res), daemon=True).start()
     return jsonify({"ok": True})
 
+@app.route("/api/tool/<sid>/edit/speedup", methods=["POST"])
+def api_tool_edit_speedup(sid):
+    data = request.json or {}
+    try:
+        start = float(data.get("start", 0))
+        end = float(data.get("end", 0))
+        rate = float(data.get("rate", 2))
+    except (ValueError, TypeError):
+        return jsonify({"error": "参数格式错误"}), 400
+    if end <= start or rate <= 1:
+        return jsonify({"error": "结束时间需大于起始时间，倍速需大于1"}), 400
+    _tool_save_state(sid, stage="processing", msg="视频变速中...")
+    threading.Thread(target=_pipeline_tool_speedup, args=(sid, start, end, rate), daemon=True).start()
+    return jsonify({"ok": True})
+
+@app.route("/api/tool/<sid>/edit/speedup-merge", methods=["POST"])
+def api_tool_edit_speedup_merge(sid):
+    audio = request.files.get("audio")
+    if not audio:
+        return jsonify({"error": "请上传录音"}), 400
+    d = _tool_session(sid)
+    if not (d / "speedup_meta.json").exists():
+        return jsonify({"error": "请先执行变速操作"}), 400
+    ext = Path(audio.filename).suffix or ".webm"
+    audio_path = d / f"speedup_audio{ext}"
+    audio.save(str(audio_path))
+    _tool_save_state(sid, stage="processing", msg="合成视频中...")
+    threading.Thread(target=_pipeline_tool_speedup_merge, args=(sid, str(audio_path)), daemon=True).start()
+    return jsonify({"ok": True})
+
 @app.route("/api/tool/<sid>/result")
 def api_tool_result(sid):
     d = _tool_session(sid)
@@ -2390,6 +2420,127 @@ def _pipeline_tool_convert(sid, fmt, res):
         _tool_save_state(sid, stage="done", msg=f"转换完成 ({fmt})", result_file=out_name)
     except Exception as e:
         _tool_save_state(sid, stage="error", msg=f"转换失败: {e}\n{traceback.format_exc()}")
+
+def _pipeline_tool_speedup(sid, start, end, rate):
+    d = _tool_session(sid)
+    try:
+        inp = _tool_input_video(sid)
+        ow, oh, total_dur = _get_video_info(str(inp))
+
+        part1 = d / "_sp_part1.mp4"
+        part2 = d / "_sp_part2.mp4"
+        speed_raw = d / "_sp_raw.mp4"
+        speed_up = d / "_sp_fast.mp4"
+        out = d / "result.mp4"
+
+        vf = f"scale={ow}:{oh}:force_original_aspect_ratio=decrease,pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"
+
+        if start > 0:
+            subprocess.run([FFMPEG, "-y", "-i", str(inp), "-t", str(start),
+                            "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
+                            str(part1)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+        subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(start), "-to", str(end),
+                        "-an", "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                        "-r", "25", "-pix_fmt", "yuv420p",
+                        str(speed_raw)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+        subprocess.run([FFMPEG, "-y", "-i", str(speed_raw),
+                        "-vf", f"setpts=PTS/{rate}",
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                        "-pix_fmt", "yuv420p",
+                        str(speed_up)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+        if end < total_dur - 0.1:
+            subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(end),
+                            "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
+                            str(part2)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+
+        _, _, new_seg_dur = _get_video_info(str(speed_up))
+
+        segments = []
+        if start > 0:
+            segments.append(part1)
+        segments.append(speed_up)
+        if end < total_dur - 0.1:
+            segments.append(part2)
+        _ffmpeg_concat(segments, str(out))
+
+        new_start = start
+        new_end = start + new_seg_dur
+        meta = {"start": start, "end": end, "rate": rate,
+                "new_start": new_start, "new_end": new_end,
+                "new_seg_duration": new_seg_dur}
+        (d / "speedup_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+        old = _tool_input_video(sid)
+        old.unlink(missing_ok=True)
+        out.rename(d / "input.mp4")
+
+        for f in [part1, part2, speed_raw, speed_up]:
+            f.unlink(missing_ok=True)
+
+        _tool_save_state(sid, stage="done", msg="变速完成！请录制新音频",
+                         result_file="input.mp4")
+    except Exception as e:
+        _tool_save_state(sid, stage="error", msg=f"变速失败: {e}\n{traceback.format_exc()}")
+
+def _pipeline_tool_speedup_merge(sid, audio_path):
+    d = _tool_session(sid)
+    try:
+        inp = _tool_input_video(sid)
+        meta = json.loads((d / "speedup_meta.json").read_text("utf-8"))
+        new_start = meta["new_start"]
+        new_end = meta["new_end"]
+
+        ow, oh, total_dur = _get_video_info(str(inp))
+
+        part1 = d / "_sm_part1.mp4"
+        part2 = d / "_sm_part2.mp4"
+        speed_seg = d / "_sm_speed.mp4"
+        merged_seg = d / "_sm_merged.mp4"
+        out = d / "result.mp4"
+
+        vf = f"scale={ow}:{oh}:force_original_aspect_ratio=decrease,pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"
+
+        if new_start > 0:
+            subprocess.run([FFMPEG, "-y", "-i", str(inp), "-t", str(new_start),
+                            "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
+                            str(part1)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+        subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(new_start), "-to", str(new_end),
+                        "-an", "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                        "-pix_fmt", "yuv420p",
+                        str(speed_seg)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+        if new_end < total_dur - 0.1:
+            subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(new_end),
+                            "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
+                            str(part2)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+
+        subprocess.run([FFMPEG, "-y", "-i", str(speed_seg), "-i", audio_path,
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
+                        str(merged_seg)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+
+        segments = []
+        if new_start > 0:
+            segments.append(part1)
+        segments.append(merged_seg)
+        if new_end < total_dur - 0.1:
+            segments.append(part2)
+        _ffmpeg_concat(segments, str(out))
+
+        old = _tool_input_video(sid)
+        old.unlink(missing_ok=True)
+        out.rename(d / "input.mp4")
+
+        for f in [part1, part2, speed_seg, merged_seg, d / "speedup_meta.json"]:
+            f.unlink(missing_ok=True)
+        Path(audio_path).unlink(missing_ok=True)
+
+        _tool_save_state(sid, stage="done", msg="合成完成",
+                         result_file="input.mp4")
+    except Exception as e:
+        _tool_save_state(sid, stage="error", msg=f"合成失败: {e}\n{traceback.format_exc()}")
 
 if __name__ == "__main__":
     import sys
