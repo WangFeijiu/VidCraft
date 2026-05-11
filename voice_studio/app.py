@@ -27,6 +27,10 @@ FFMPEG       = (r"D:/Tech/program/python/Lib/site-packages"
 HF_CACHE     = r"E:/视频处理/.cache/huggingface"
 COSYVOICE_DIR = Path(r"E:/视频处理/CosyVoice")
 IMG2VID    = BASE / "img2vid"
+
+# Cached CosyVoice model instance (expensive to load)
+_COSYVOICE_MODEL_INSTANCE = None
+_COSYVOICE_MODEL_NAME = None
 IMG2VID.mkdir(exist_ok=True)
 
 VOICE_LIBRARY = [
@@ -328,9 +332,25 @@ def api_delete_rec(name, idx):
 
 @app.route("/api/project/<name>/recorded")
 def api_recorded(name):
-    return jsonify([int(f.name.split("_")[1].split(".")[0])
-                    for f in (pd(name) / "recordings").glob("s_*.webm")
-                    if "_clone" not in f.name])
+    # Only count an idx as "manual recording" when the user explicitly chose
+    # manual. accept-clone copies the clone audio onto s_<idx>.webm so the
+    # composer can find it, which would otherwise make the manual playback
+    # button light up for clone-accepted sentences. Legacy projects with no
+    # selected_sources entry default to manual.
+    state = load_state(name)
+    selected = state.get("selected_sources", {})
+    out = []
+    for f in (pd(name) / "recordings").glob("s_*.webm"):
+        if "_clone" in f.name:
+            continue
+        try:
+            idx = int(f.name.split("_")[1].split(".")[0])
+        except (ValueError, IndexError):
+            continue
+        src = selected.get(str(idx))
+        if src is None or src == "manual":
+            out.append(idx)
+    return jsonify(out)
 
 @app.route("/api/project/<name>/cloned")
 def api_cloned(name):
@@ -421,11 +441,8 @@ def api_clone_preview_all(name):
     return send_file(str(out), mimetype="audio/webm")
 def api_clear_clones(name):
     """Delete all clone audio files so cloning can restart with a new voice."""
-    d = pd(name) / "recordings"
-    count = 0
-    for f in d.glob("s_*_clone.webm"):
-        f.unlink(missing_ok=True)
-        count += 1
+    count = sum(1 for _ in (pd(name) / "recordings").glob("s_*_clone.webm"))
+    _clear_stale_clones(name)
     save_state(name, stage="recording", msg="", clone_progress=[0, 0], voice_id="", clone_prompt_text="")
     return jsonify({"ok": True, "deleted": count})
 
@@ -435,19 +452,23 @@ def api_regen_clone(name, idx):
     sentences = json.loads(_active_sentences_path(name).read_text("utf-8"))
     if idx < 1 or idx > len(sentences):
         return jsonify({"error": "序号越界"}), 400
-    prompt_text = request.json.get("prompt_text", "大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。")
     state = load_state(name)
     voice_id = state.get("voice_id", "")
+    # prompt_text for zero-shot MUST match the actual content of voice_sample.wav,
+    # otherwise CosyVoice leaks the sample audio into the output (e.g. user requests
+    # sentence X but hears "谢谢大家" because that's what the sample said).
+    # Prefer (1) body override, (2) state.clone_prompt_text which _pipeline_voice_clone
+    # populates with a Whisper transcription, (3) live transcription as a last resort.
+    # The hardcoded "大家好..." default from api_voice_clone is unsafe to reuse here
+    # because it almost never matches the sample.
+    body = request.json or {}
+    prompt_text = (body.get("prompt_text") or state.get("clone_prompt_text") or "").strip()
     try:
-        sys.path.insert(0, str(COSYVOICE_DIR))
-        sys.path.insert(0, str(COSYVOICE_DIR / "third_party" / "Matcha-TTS"))
-        from cosyvoice.cli.cosyvoice import AutoModel
         import torchaudio
-
-        model_dir, model_name = _get_cosyvoice_model()
-        if not model_dir:
-            return jsonify({"error": "未找到 CosyVoice 模型"}), 500
-        model = AutoModel(model_dir=model_dir)
+        # Reuse the cached model so we don't pay full load cost (and don't risk
+        # cold-start artifacts on every regen). _load_cosyvoice_model_cached
+        # handles sys.path setup and imports internally.
+        model, model_name = _load_cosyvoice_model_cached()
 
         seg = sentences[idx - 1]
         voice = next((v for v in VOICE_LIBRARY if v["id"] == voice_id), None)
@@ -465,6 +486,16 @@ def api_regen_clone(name, idx):
                                check=True, capture_output=True)
                 wav_out.unlink(missing_ok=True)
         else:
+            # Zero-shot needs prompt_text matching the sample's actual content.
+            # When the user did not supply one in the body, transcribe the sample
+            # the same way _pipeline_voice_clone does, so regen output matches what
+            # an initial clone would have produced.
+            if not prompt_text:
+                sample_wav = d / "voice_sample.wav"
+                if sample_wav.exists():
+                    prompt_text = _transcribe_sample(sample_wav) or ""
+                    if prompt_text:
+                        save_state(name, clone_prompt_text=prompt_text)
             if "CosyVoice3" in model_name:
                 full_prompt = "You are a helpful assistant.<|endofprompt|>" + prompt_text
             else:
@@ -479,6 +510,14 @@ def api_regen_clone(name, idx):
                                 "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
                                check=True, capture_output=True)
                 wav_out.unlink(missing_ok=True)
+        # If the user previously accept-cloned this sentence, the composer reads
+        # s_<idx>.webm (a frozen copy of the prior clone). Refresh that copy so
+        # the next playback / final compose reflects the regen output.
+        state = load_state(name)
+        sel = (state.get("selected_sources", {}) or {}).get(str(idx))
+        if sel == "clone":
+            shutil.copy2(str(d / "recordings" / f"s_{idx:03d}_clone.webm"),
+                         str(d / "recordings" / f"s_{idx:03d}.webm"))
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -646,14 +685,23 @@ def api_download(name):
     p = pd(name) / "final.mp4"
     if p.exists():
         return send_file(str(p), mimetype="video/mp4",
-                         as_attachment=True, attachment_filename=f"{name}_final.mp4")
+                         as_attachment=True, download_name=f"{name}_final.mp4")
     inp = _input_video(name)
     if inp.exists():
         mt = {"avi": "video/x-msvideo", "mkv": "video/x-matroska", "mov": "video/quicktime",
               "webm": "video/webm", "flv": "video/x-flv", "wmv": "video/x-ms-wmv"}.get(inp.suffix.lstrip("."), "video/mp4")
         return send_file(str(inp), mimetype=mt,
-                         as_attachment=True, attachment_filename=inp.name)
+                         as_attachment=True, download_name=inp.name)
     return ("", 404)
+
+@app.route("/api/project/<name>/final-video")
+def api_project_final_video(name):
+    """Stream the composed final.mp4 inline (for the done-stage preview).
+    Distinct from /video (which serves the input) and /download (attachment)."""
+    p = pd(name) / "final.mp4"
+    if not p.exists():
+        return ("", 404)
+    return send_file(str(p), mimetype="video/mp4", conditional=True)
 
 @app.route("/api/project/<name>/video")
 def api_project_video(name):
@@ -915,7 +963,7 @@ def _pipeline_match(name, user_text):
             socketio.emit('match_progress', {
                 'project': name,
                 'msg': f'匹配中... {user_end}/{total_user} 句',
-                'progress': int((user_end / total_user) * 90)
+                'progress': int((user_end / total_user) * 100)
             }, namespace='/')
 
             # Build prompt for LLM
@@ -978,7 +1026,7 @@ def _pipeline_match(name, user_text):
         socketio.emit('match_progress', {
             'project': name,
             'msg': '整合结果中...',
-            'progress': 95
+            'progress': 100
         }, namespace='/')
 
         # Build final result
@@ -1031,11 +1079,39 @@ def _pipeline_match(name, user_text):
         }, namespace='/')
 
 # ── Routes: voice clone ─────────────────────────────────────────────
+def _clear_stale_clones(name):
+    """Remove all previous clone outputs and clone-accepted copies before a new
+    clone job, so the new run does not inherit stale audio (resume logic in
+    _pipeline_voice_clone skips sentences whose clone webm already exists) or
+    stale "auto-confirmed" selections from a prior run on the same project.
+    Manual recordings (selected_sources[idx] == 'manual') are preserved.
+    Note: does NOT clear the _cancel_clone flag — caller decides that."""
+    rec_dir = pd(name) / "recordings"
+    if not rec_dir.exists():
+        return
+    for f in rec_dir.glob("s_*_clone.webm"):
+        f.unlink(missing_ok=True)
+    for f in rec_dir.glob("s_*_clone.wav"):
+        f.unlink(missing_ok=True)
+    state = load_state(name)
+    selected = state.get("selected_sources", {}) or {}
+    kept = {}
+    for k, v in selected.items():
+        if v == "manual":
+            kept[k] = v
+        else:
+            # 'clone' entries: also delete the accepted-clone copy
+            (rec_dir / f"s_{int(k):03d}.webm").unlink(missing_ok=True)
+    save_state(name, selected_sources=kept)
+
 @app.route("/api/project/<name>/voice-clone", methods=["POST"])
 def api_voice_clone(name):
     d = pd(name)
     voice_id = request.form.get("voice_id", "")
     prompt_text = request.form.get("prompt_text", "大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。")
+
+    _cancel_clone.discard(name)
+    _clear_stale_clones(name)
 
     # Voice library mode: no sample upload needed
     if voice_id and any(v["id"] == voice_id for v in VOICE_LIBRARY):
@@ -1101,14 +1177,8 @@ def api_resume_clone(name):
 def api_cancel_clone(name):
     """Cancel an in-progress cloning task and clear all clone data."""
     _cancel_clone.add(name)
-    # Delete all clone files
-    rec_dir = pd(name) / "recordings"
-    count = 0
-    for f in rec_dir.glob("s_*_clone.webm"):
-        f.unlink(missing_ok=True)
-        count += 1
-    for f in rec_dir.glob("s_*_clone.wav"):
-        f.unlink(missing_ok=True)
+    count = sum(1 for _ in (pd(name) / "recordings").glob("s_*_clone.webm"))
+    _clear_stale_clones(name)
     save_state(name, stage="recording", msg="", clone_progress=[0, 0], voice_id="", clone_prompt_text="")
     return jsonify({"ok": True, "deleted": count})
 def api_voice_preview_get(voice_id):
@@ -1425,19 +1495,51 @@ def _get_cosyvoice_model():
             return str(COSYVOICE_DIR / "pretrained_models" / name), name
     return None, None
 
+
+def _load_cosyvoice_model_cached():
+    """Load CosyVoice model once and cache it globally."""
+    global _COSYVOICE_MODEL_INSTANCE, _COSYVOICE_MODEL_NAME
+    if _COSYVOICE_MODEL_INSTANCE is not None:
+        return _COSYVOICE_MODEL_INSTANCE, _COSYVOICE_MODEL_NAME
+
+    sys.path.insert(0, str(COSYVOICE_DIR))
+    sys.path.insert(0, str(COSYVOICE_DIR / "third_party" / "Matcha-TTS"))
+    from cosyvoice.cli.cosyvoice import AutoModel
+    import torchaudio  # noqa: F401
+
+    model_dir, model_name = _get_cosyvoice_model()
+    if not model_dir:
+        raise FileNotFoundError("未找到 CosyVoice 模型")
+    _COSYVOICE_MODEL_INSTANCE = AutoModel(model_dir=model_dir)
+    _COSYVOICE_MODEL_NAME = model_name
+
+    # Warm-up inference: CosyVoice's first call after a fresh load tends to emit
+    # an extremely quiet or mostly-silent waveform — observed as "the first
+    # sentence is barely audible" while every subsequent sentence is fine. Run a
+    # throw-away zero-shot call against the bundled prompt so the model is warm
+    # by the time any user-facing request arrives. Output is discarded.
+    try:
+        warm_ref = COSYVOICE_DIR / "asset" / "zero_shot_prompt.wav"
+        if warm_ref.exists():
+            warm_prompt = "希望你以后能够做的比我还好呦。"
+            warm_text = "收到好友从远方寄来的生日礼物。"
+            if "CosyVoice3" in model_name:
+                warm_full_prompt = "You are a helpful assistant.<|endofprompt|>" + warm_prompt
+            else:
+                warm_full_prompt = warm_prompt
+            for _ in _COSYVOICE_MODEL_INSTANCE.inference_zero_shot(
+                    warm_text, warm_full_prompt, str(warm_ref), stream=False):
+                pass
+    except Exception:
+        pass  # Warmup is best-effort — don't fail model load if it errors
+
+    return _COSYVOICE_MODEL_INSTANCE, _COSYVOICE_MODEL_NAME
+
 def _pipeline_voice_clone(name, prompt_text, voice_id=""):
     d = pd(name)
     try:
-        sys.path.insert(0, str(COSYVOICE_DIR))
-        sys.path.insert(0, str(COSYVOICE_DIR / "third_party" / "Matcha-TTS"))
-        from cosyvoice.cli.cosyvoice import AutoModel
-        import torchaudio
-
-        model_dir, model_name = _get_cosyvoice_model()
-        if not model_dir:
-            raise FileNotFoundError("未找到 CosyVoice 模型，请先下载模型到 E:/视频处理/CosyVoice/pretrained_models/")
-
-        model = AutoModel(model_dir=model_dir)
+        import torchaudio  # used to save each clone's wav before encoding to webm
+        model, model_name = _load_cosyvoice_model_cached()
         sentences = json.loads(_active_sentences_path(name).read_text("utf-8"))
         total = len(sentences)
 
@@ -1681,6 +1783,35 @@ def _get_video_info(path):
     m2 = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", probe.stderr or "")
     dur = int(m2.group(1))*3600 + int(m2.group(2))*60 + float(m2.group(3)) if m2 else 600
     return w, h, dur
+
+def _has_audio(path):
+    """Return True if the file has at least one audio stream."""
+    r = subprocess.run([FFMPEG, "-i", str(path)],
+                       capture_output=True, encoding='utf-8', errors='ignore')
+    return "Audio:" in (r.stderr or "")
+
+def _enc_for_concat(src_path, dst_path, w, h, *, ss=None, t=None, fps=25, sr=44100):
+    """Re-encode src to dst with stable params that concat -c copy can stitch together.
+    Forces h264 / yuv420p / AAC stereo at the given sample rate, scales+pads to w x h.
+    If src has no audio stream, a silent AAC track of equal duration is synthesized so
+    every segment has the same stream layout."""
+    vf = (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+          f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1")
+    has_a = _has_audio(src_path)
+    cmd = [FFMPEG, "-y", "-i", str(src_path)]
+    if not has_a:
+        cmd += ["-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate={sr}"]
+    if ss is not None:
+        cmd += ["-ss", str(ss)]
+    if t is not None:
+        cmd += ["-t", str(t)]
+    cmd += ["-vf", vf, "-r", str(fps),
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k", "-ar", str(sr), "-ac", "2"]
+    if not has_a:
+        cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+    cmd += [str(dst_path)]
+    subprocess.run(cmd, check=True, capture_output=True, encoding='utf-8', errors='ignore')
 
 def _reencode_to(path_in, path_out, width, height, extra_args=None):
     """Re-encode video to exactly width x height (scale + pad with black bars)."""
@@ -2126,10 +2257,16 @@ def api_i2v_reorder(name):
 
 @app.route("/api/img2vid/<name>/analyze", methods=["POST"])
 def api_i2v_analyze(name):
+    style = request.json.get("style", "") if request.is_json else request.form.get("style", "")
     i2v_save(name, stage="analyzing", msg="AI 正在识别图片并生成旁白...")
     theme = i2v_state(name).get("theme", "")
-    threading.Thread(target=_pipeline_i2v_analyze, args=(name, theme), daemon=True).start()
+    i2v_save(name, narration_style=style)
+    threading.Thread(target=_pipeline_i2v_analyze, args=(name, theme, style), daemon=True).start()
     return jsonify({"ok": True})
+
+@app.route("/api/narration-styles")
+def api_narration_styles():
+    return jsonify([{**v, "id": k} for k, v in NARRATION_STYLES.items()])
 
 @app.route("/api/img2vid/<name>/narration")
 def api_i2v_narration(name):
@@ -2145,7 +2282,7 @@ def api_i2v_save_narration(name):
 
 @app.route("/api/img2vid/<name>/voice-sample", methods=["POST"])
 def api_i2v_voice(name):
-    f = request.files.get("audio")
+    f = request.files.get("audio") or request.files.get("sample")
     if not f:
         return jsonify({"error": "请上传音频"}), 400
     d = i2v_path(name)
@@ -2157,12 +2294,41 @@ def api_i2v_voice(name):
                     str(d / "voice_sample.wav")],
                    check=True, capture_output=True)
     raw.unlink(missing_ok=True)
+    i2v_save(name, voice_ready=True)
     return jsonify({"ok": True})
+
+@app.route("/api/img2vid/<name>/preview-audio", methods=["POST"])
+def api_i2v_preview_audio(name):
+    i2v_save(name, stage="audio_preview", msg="正在逐句生成配音...")
+    threading.Thread(target=_pipeline_i2v_preview_audio, args=(name,), daemon=True).start()
+    return jsonify({"ok": True})
+
+@app.route("/api/img2vid/<name>/stage", methods=["PUT"])
+def api_i2v_stage(name):
+    data = request.json or {}
+    stage = data.get("stage", "")
+    allowed = {"uploading", "narration_ready", "audio_preview"}
+    if stage in allowed:
+        i2v_save(name, stage=stage, msg="")
+    return jsonify({"ok": True})
+
+@app.route("/api/img2vid/<name>/audio/<int:idx>")
+def api_i2v_audio_segment(name, idx):
+    d = i2v_path(name)
+    p = d / "recordings" / f"s_{idx:03d}.webm"
+    if not p.exists():
+        p = d / "recordings" / f"s_{idx:03d}.wav"
+    if not p.exists():
+        return ("", 404)
+    mt = "audio/webm" if p.suffix == ".webm" else "audio/wav"
+    return send_file(str(p), mimetype=mt)
 
 @app.route("/api/img2vid/<name>/generate", methods=["POST"])
 def api_i2v_generate(name):
-    i2v_save(name, stage="generating", msg="开始生成视频...")
-    threading.Thread(target=_pipeline_i2v_generate, args=(name,), daemon=True).start()
+    data = request.get_json(silent=True) or {}
+    animate = bool(data.get("animate", True))
+    i2v_save(name, stage="generating", msg="开始合成视频...", animate=animate)
+    threading.Thread(target=_pipeline_i2v_compose_video, args=(name,), daemon=True).start()
     return jsonify({"ok": True})
 
 @app.route("/api/img2vid/<name>/download")
@@ -2170,7 +2336,13 @@ def api_i2v_download(name):
     p = i2v_path(name) / "final.mp4"
     if not p.exists(): return ("", 404)
     return send_file(str(p), mimetype="video/mp4",
-                     as_attachment=True, attachment_filename=f"{name}.mp4")
+                     as_attachment=True, download_name=f"{name}.mp4")
+
+@app.route("/api/img2vid/<name>/video")
+def api_i2v_video(name):
+    p = i2v_path(name) / "final.mp4"
+    if not p.exists(): return ("", 404)
+    return send_file(str(p), mimetype="video/mp4", conditional=True)
 
 @app.route("/api/img2vid/<name>", methods=["DELETE"])
 def api_i2v_delete(name):
@@ -2215,131 +2387,377 @@ def api_i2v_reset(name):
     return jsonify({"ok": True})
 
 # ── Image-to-Video pipelines ───────────────────────────────────────
-def _pipeline_i2v_analyze(name, theme):
+NARRATION_STYLES = {
+    "documentary": {
+        "name": "纪录片旁白",
+        "prompt": "请用纪录片旁白的风格，声音平和、娓娓道来，像在讲一个故事。",
+    },
+    "humor": {
+        "name": "幽默风趣",
+        "prompt": "请用幽默风趣的风格，语言活泼有趣，适当加入轻松的比喻和调侃。",
+    },
+    "story": {
+        "name": "故事讲述",
+        "prompt": "请用讲故事的风格，语言生动有画面感，像一个说书人在娓娓道来。",
+    },
+    "educational": {
+        "name": "科普解说",
+        "prompt": "请用科普解说的风格，语言准确严谨但通俗易懂，像在讲解一个知识。",
+    },
+    "product": {
+        "name": "产品介绍",
+        "prompt": "请用产品介绍的风格，语言专业有说服力，突出亮点和特点。",
+    },
+    "news": {
+        "name": "新闻报道",
+        "prompt": "请用新闻报道的风格，语言正式客观，像新闻播报员在报道。",
+    },
+}
+
+def _pipeline_i2v_analyze(name, theme, style=""):
     d = i2v_path(name)
     try:
         import PIL.Image
         images_dir = d / "images"
         img_files = sorted(images_dir.glob("img_*"))
-        images_b64 = []
-        for f in img_files:
+        n = len(img_files)
+        if n == 0:
+            raise ValueError("没有图片")
+
+        # Step 1: Load and compress all images
+        image_data = []
+        for i, f in enumerate(img_files):
+            i2v_save(name, stage="analyzing",
+                     msg=f"正在读取图片 {i+1}/{n}...",
+                     generate_progress=[0, n])
             img = PIL.Image.open(f)
             img.thumbnail((1024, 1024))
             buf = __import__("io").BytesIO()
             img.save(buf, format="JPEG", quality=85)
-            images_b64.append(base64.b64encode(buf.getvalue()).decode())
+            img_b64 = base64.b64encode(buf.getvalue()).decode()
+            image_data.append({"idx": i, "b64": img_b64})
 
-        prompt = (
-            f"你是一个视频制作专家。以下是按顺序排列的 {len(images_b64)} 张图片。"
-            + (f"用户提供的主题是：{theme}\n" if theme else "")
-            + "请为每张图片生成一段旁白（2-3句话，适合朗读配音）。\n"
-            "要求：旁白要连贯，前后图片之间要有自然过渡；语言口语化。\n"
-            "输出JSON数组，每个元素：{\"image_idx\": 序号(从0开始), \"narration\": \"旁白文字\"}"
+        # Step 2: Analyze each image individually with vision LLM (parallel)
+        style_info = NARRATION_STYLES.get(style, {})
+        style_hint = style_info.get("prompt", "")
+        style_line = f"\n旁白风格：{style_hint}" if style_hint else ""
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        analyses = [None] * n
+        done_count = {"v": 0}
+        done_lock = threading.Lock()
+
+        i2v_save(name, stage="analyzing",
+                 msg=f"正在并行分析 {n} 张图片...",
+                 generate_progress=[0, n])
+
+        def _analyze_one(i, b64):
+            single_prompt = (
+                f"请详细分析这张图片（第 {i+1}/{n} 张）。"
+                "列出你看到的所有文字内容、图表数据、核心概念或场景描述。"
+                "请尽可能详细和准确，不要编造。"
+            )
+            analysis_text = ""
+            for attempt in range(2):
+                try:
+                    print(f"[i2v] analyzing image {i+1}/{n} for {name} (attempt {attempt+1})")
+                    resp = call_llm_vision(single_prompt, [b64],
+                                           system="你是一个图片分析专家。请详细准确地描述图片内容，特别要提取所有可见文字。",
+                                           timeout=45)
+                    analysis_text = resp.strip()
+                    print(f"[i2v] image {i+1}/{n} analyzed OK")
+                    break
+                except Exception as e:
+                    print(f"[i2v] image {i+1}/{n} attempt {attempt+1} failed: {e}")
+                    if attempt == 1:
+                        analysis_text = "（此图片未能成功识别，建议手动编辑旁白）"
+            return i, analysis_text
+
+        max_workers = min(6, n)
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(_analyze_one, item["idx"], item["b64"]) for item in image_data]
+            for fut in as_completed(futures):
+                i, analysis_text = fut.result()
+                analyses[i] = {
+                    "image_idx": i,
+                    "analysis": analysis_text,
+                    "skipped": not analysis_text or "未能成功识别" in analysis_text,
+                }
+                with done_lock:
+                    done_count["v"] += 1
+                    progress = done_count["v"]
+                i2v_save(name, stage="analyzing",
+                         msg=f"已完成 {progress}/{n} 张图片分析...",
+                         generate_progress=[progress, n])
+
+        # Step 3: Generate narration from all analyses
+        i2v_save(name, stage="analyzing",
+                 msg="正在生成旁白...",
+                 generate_progress=[n, n])
+
+        analyses_text = "\n\n".join([
+            f"【图片 {a['image_idx']+1} 分析】\n{a['analysis']}"
+            for a in analyses
+        ])
+
+        narration_prompt = (
+            f"你是一个视频旁白生成专家。以下是 {n} 张图片的详细分析：\n\n"
+            f"{analyses_text}\n\n"
+            f"请基于以上分析，为每张图片生成 2-3 句旁白。要求：\n"
+            f"- 旁白必须基于分析中的实际内容，禁止编造\n"
+            f"- 口语化，适合朗读配音\n"
+            f"- 多张图片之间逻辑连贯、过渡自然\n"
+            f"{style_line}\n\n"
+            f"输出 JSON 数组，每个元素："
+            f'{{"image_idx": 序号(从0开始), "narration": "旁白文字"}}'
         )
-        resp = call_llm_vision(prompt, images_b64,
-                               system="你是一个JSON输出专家，只输出纯JSON数组，不要任何解释文字。")
+
+        resp = call_llm(narration_prompt,
+                        system="你是一个JSON输出专家，只输出纯JSON数组，不要markdown代码块，不要任何解释文字。")
         cleaned = re.sub(r'```json\s*|\s*```', '', resp).strip()
         narration = json.loads(cleaned)
+
+        # Merge analyses into narration for frontend display
+        for item in narration:
+            idx = item.get("image_idx", 0)
+            if 0 <= idx < len(analyses):
+                item["analysis"] = analyses[idx]["analysis"]
+
         if not isinstance(narration, list):
             raise ValueError("LLM 返回格式错误")
         (d / "narration.json").write_text(json.dumps(narration, ensure_ascii=False, indent=2), "utf-8")
         i2v_save(name, stage="narration_ready", msg="旁白生成完成，请查看并编辑")
     except Exception as e:
-        i2v_save(name, stage="error", msg=f"分析失败: {e}\n{traceback.format_exc()}")
+        # Fallback: create empty narration entries so user can manually fill in
+        import PIL.Image
+        images_dir = d / "images"
+        img_files = sorted(images_dir.glob("img_*"))
+        fallback_narration = [
+            {"image_idx": i, "narration": ""}
+            for i in range(len(img_files))
+        ]
+        (d / "narration.json").write_text(
+            json.dumps(fallback_narration, ensure_ascii=False, indent=2), "utf-8"
+        )
+        i2v_save(name, stage="narration_ready",
+                 msg=f"AI 分析失败（{type(e).__name__}），已生成空旁白模板，请手动填写。",
+                 narration_style=style)
+        print(f"[i2v] analyze fallback for {name}: {e}")
 
-def _pipeline_i2v_generate(name):
+def _get_i2v_voice_settings(d):
+    """Load CosyVoice model and resolve voice sample + prompt text for i2v."""
+    model, model_name = _load_cosyvoice_model_cached()
+
+    voice_sample = d / "voice_sample.wav"
+    has_voiceprint = voice_sample.exists()
+    if has_voiceprint:
+        is_valid = False
+        try:
+            with open(voice_sample, "rb") as _vfh:
+                head = _vfh.read(12)
+            if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+                import soundfile as _sf_check
+                _sf_check.info(str(voice_sample))
+                is_valid = True
+        except Exception:
+            is_valid = False
+        if not is_valid:
+            try:
+                backup = d / "_voice_sample_raw.bin"
+                if backup.exists(): backup.unlink()
+                voice_sample.rename(backup)
+                subprocess.run([FFMPEG, "-y", "-i", str(backup),
+                                "-ar", "24000", "-ac", "1", "-f", "wav",
+                                str(voice_sample)],
+                               check=True, capture_output=True)
+                backup.unlink(missing_ok=True)
+                import soundfile as _sf_check2
+                _sf_check2.info(str(voice_sample))
+            except Exception:
+                voice_sample.unlink(missing_ok=True)
+                has_voiceprint = False
+    if not has_voiceprint:
+        voice_sample = COSYVOICE_DIR / "asset" / "zero_shot_prompt.wav"
+
+    prompt_text = "大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。"
+    if has_voiceprint:
+        transcribed = _transcribe_sample(voice_sample)
+        if transcribed:
+            prompt_text = transcribed
+    if "CosyVoice3" in (model_name or ""):
+        full_prompt = "You are a helpful assistant.<|endofprompt|>" + prompt_text
+    else:
+        full_prompt = prompt_text
+
+    return model, str(voice_sample), full_prompt, model_name
+
+
+def _pipeline_i2v_preview_audio(name):
+    """Generate individual audio clips for each narration segment."""
     d = i2v_path(name)
     try:
         narration = json.loads((d / "narration.json").read_text("utf-8"))
         n_items = len(narration)
+        if not n_items:
+            raise ValueError("没有旁白内容")
 
-        # ── Step 1: TTS for each narration segment ──
-        i2v_save(name, stage="generating", msg="生成语音 0/{}...".format(n_items))
-        sys.path.insert(0, str(COSYVOICE_DIR))
-        sys.path.insert(0, str(COSYVOICE_DIR / "third_party" / "Matcha-TTS"))
-        from cosyvoice.cli.cosyvoice import AutoModel
-        import torchaudio, numpy as np, soundfile as sf
-
-        model_dir, model_name = _get_cosyvoice_model()
-        if not model_dir:
-            raise FileNotFoundError("未找到 CosyVoice 模型")
-        model = AutoModel(model_dir=model_dir)
-
-        # Check for user voiceprint
-        voice_sample = d / "voice_sample.wav"
-        has_voiceprint = voice_sample.exists()
-        if has_voiceprint:
-            # Validate file is a real WAV — earlier versions saved raw webm under this name.
-            # Check both the RIFF/WAVE magic bytes AND that soundfile can read it.
-            is_valid = False
-            try:
-                with open(voice_sample, "rb") as _vfh:
-                    head = _vfh.read(12)
-                if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
-                    import soundfile as _sf_check
-                    _sf_check.info(str(voice_sample))
-                    is_valid = True
-            except Exception:
-                is_valid = False
-            if not is_valid:
-                # Try ffmpeg re-encode — original may be webm-with-wav-name or other format
-                try:
-                    backup = d / "_voice_sample_raw.bin"
-                    if backup.exists(): backup.unlink()
-                    voice_sample.rename(backup)
-                    subprocess.run([FFMPEG, "-y", "-i", str(backup),
-                                    "-ar", "24000", "-ac", "1", "-f", "wav",
-                                    str(voice_sample)],
-                                   check=True, capture_output=True)
-                    backup.unlink(missing_ok=True)
-                    import soundfile as _sf_check2
-                    _sf_check2.info(str(voice_sample))  # re-validate
-                except Exception:
-                    voice_sample.unlink(missing_ok=True)
-                    has_voiceprint = False
-        if not has_voiceprint:
-            voice_sample = COSYVOICE_DIR / "asset" / "zero_shot_prompt.wav"
-
-        prompt_text = "大家好，欢迎来到我的频道。今天我要和大家分享一个非常有趣的话题，希望你们能够喜欢这个内容，也希望大家能够多多支持，谢谢你们的关注和鼓励。"
-        if "CosyVoice3" in (model_name or ""):
-            full_prompt = "You are a helpful assistant.<|endofprompt|>" + prompt_text
-        else:
-            full_prompt = prompt_text
-
+        i2v_save(name, stage="audio_preview", msg="加载语音模型...",
+                 generate_progress=[0, n_items])
+        model, voice_sample_path, full_prompt, model_name = _get_i2v_voice_settings(d)
         SR = model.sample_rate
-        audio_segments = []  # (numpy_array, sample_rate)
+        rec_dir = d / "recordings"
+        rec_dir.mkdir(exist_ok=True)
 
+        import numpy as np, soundfile as sf
         for i, item in enumerate(narration):
-            text = item.get("narration", "")
-            i2v_save(name, stage="generating", msg=f"生成语音 {i+1}/{n_items}...")
-            for j, result in enumerate(model.inference_zero_shot(
-                text, full_prompt, str(voice_sample), stream=False)):
-                wav = result["tts_speech"].cpu().numpy().squeeze()
-                audio_segments.append((wav, SR))
+            text = item.get("narration", "").strip()
+            i2v_save(name, stage="audio_preview",
+                     msg=f"生成配音 {i+1}/{n_items}...",
+                     generate_progress=[i+1, n_items])
+            out_wav = rec_dir / f"s_{i+1:03d}.wav"
+            if len(text) < 5:
+                silence = np.zeros(int(SR * 0.5), dtype=np.float32)
+                sf.write(str(out_wav), silence, SR)
+                continue
+            try:
+                wav_list = []
+                for j, result in enumerate(model.inference_zero_shot(
+                        text, full_prompt, voice_sample_path, stream=False)):
+                    wav = result["tts_speech"].cpu().numpy().squeeze()
+                    wav_list.append(wav)
+                if wav_list:
+                    combined = np.concatenate(wav_list)
+                    sf.write(str(out_wav), combined, SR)
+            except RuntimeError as e:
+                print(f"[i2v] TTS failed for segment {i+1}: {e}")
+                silence = np.zeros(int(SR * 0.5), dtype=np.float32)
+                sf.write(str(out_wav), silence, SR)
 
-        # ── Step 2: Create video from images with matching durations ──
-        i2v_save(name, stage="generating", msg="合成视频中...")
+        i2v_save(name, stage="audio_preview", msg="配音生成完成，请试听",
+                 generate_progress=[n_items, n_items])
+    except Exception as e:
+        i2v_save(name, stage="error", msg=f"配音生成失败: {e}\n{traceback.format_exc()}")
+
+
+def _pipeline_i2v_compose_video(name):
+    """Compose final video from pre-generated audio clips + images."""
+    d = i2v_path(name)
+    try:
+        narration = json.loads((d / "narration.json").read_text("utf-8"))
+        n_items = len(narration)
+        rec_dir = d / "recordings"
+
+        # Load audio segments from pre-generated files
+        import numpy as np, soundfile as sf
+        audio_segments = []
+        for i in range(n_items):
+            wav_path = rec_dir / f"s_{i+1:03d}.wav"
+            if wav_path.exists():
+                audio, sr = sf.read(str(wav_path))
+                if audio.ndim > 1:
+                    audio = audio.mean(axis=1)
+                audio_segments.append((audio, sr))
+            else:
+                silence = np.zeros(int(24000 * 0.5), dtype=np.float32)
+                audio_segments.append((silence, 24000))
+
+        if not audio_segments:
+            raise RuntimeError("没有找到配音文件")
+
+        i2v_save(name, stage="generating", msg="合成视频中...",
+                 generate_progress=[0, n_items])
         images_dir = d / "images"
         img_files = sorted(images_dir.glob("img_*"))
-        total_audio = np.concatenate([seg for seg, _ in audio_segments])
-        total_dur = len(total_audio) / SR
-
-        # Build image-duration pairs and create video
         img_durs = []
         for i, (seg, seg_sr) in enumerate(audio_segments):
             dur = len(seg) / seg_sr
             img_durs.append((img_files[min(i, len(img_files)-1)], dur))
 
         # Save combined audio
+        total_audio = np.concatenate([seg for seg, _ in audio_segments])
         mx = float(np.max(np.abs(total_audio)))
         if mx > 0: total_audio = total_audio / mx * 0.95
-        sf.write(str(d / "audio.wav"), total_audio.astype(np.float32), SR)
+        sf.write(str(d / "audio.wav"), total_audio.astype(np.float32), 24000)
 
-        # Create silent video from images at 1920x1080
-        _ffmpeg_concat_images(img_durs, str(d / "video_only.mp4"),
-                              "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black")
+        # Ken Burns + crossfade
+        animate = bool(i2v_state(name).get("animate", True))
+        FPS, W, H = 25, 1920, 1080
+        kb_dir = d / "_kb_tmp"; kb_dir.mkdir(exist_ok=True)
+        kb_clips = []
+        for ki, (img_p, dur) in enumerate(img_durs):
+            frames = max(int(dur * FPS), 25)
+            clip_out = kb_dir / f"kb_{ki:04d}.mp4"
+            if animate:
+                z_inc = 0.25 / frames
+                pat = ki % 4
+                if pat == 0:
+                    z = f"min(zoom+{z_inc:.6f},1.25)"
+                    x, y = "(iw-zoom*iw)/2", "(ih-zoom*ih)/2"
+                elif pat == 1:
+                    z = f"if(eq(on,1),1.25,max(zoom-{z_inc:.6f},1.0))"
+                    x, y = "(iw-zoom*iw)/2", "(ih-zoom*ih)/2"
+                elif pat == 2:
+                    z = "1.2"
+                    x = f"min((iw-1.2*iw)/{frames}*(on-1),iw-1.2*iw)"
+                    y = "(ih-1.2*ih)/2"
+                else:
+                    z = "1.2"
+                    x = f"max((iw-1.2*iw)-(iw-1.2*iw)/{frames}*(on-1),0)"
+                    y = "(ih-1.2*ih)/2"
+                vf = (f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                      f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,"
+                      f"zoompan=z='{z}':x='{x}':y='{y}'"
+                      f":d={frames}:s={W}x{H}:fps={FPS}")
+                cmd = [FFMPEG, "-y", "-i", str(img_p),
+                       "-vf", vf, "-t", f"{dur:.3f}",
+                       "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                       "-preset", "ultrafast", "-crf", "23",
+                       str(clip_out)]
+            else:
+                vf = (f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                      f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1")
+                cmd = [FFMPEG, "-y", "-loop", "1", "-i", str(img_p),
+                       "-vf", vf, "-t", f"{dur:.3f}", "-r", f"{FPS}",
+                       "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                       "-preset", "ultrafast", "-crf", "23",
+                       str(clip_out)]
+            subprocess.run(cmd, check=True, capture_output=True, encoding="utf-8", errors="ignore")
+            kb_clips.append(clip_out)
+            i2v_save(name, stage="generating",
+                     msg=f"渲染第 {ki+1}/{n_items} 段画面...",
+                     generate_progress=[ki+1, n_items])
 
-        # Build SRT subtitles from narration
+        CF = 0.5
+        n_clips = len(kb_clips)
+        i2v_save(name, stage="generating", msg="拼接画面、淡入淡出...",
+                 generate_progress=[n_items, n_items])
+        if n_clips == 1:
+            shutil.copy2(str(kb_clips[0]), str(d / "video_only.mp4"))
+        else:
+            inputs = []
+            for c in kb_clips:
+                inputs.extend(["-i", str(c)])
+            fc_parts = []
+            cum_dur = 0.0
+            for fi in range(n_clips - 1):
+                cum_dur += img_durs[fi][1]
+                offset = max(0.1, cum_dur - (fi + 1) * CF)
+                in1 = "[0:v]" if fi == 0 else f"[v{fi-1}]"
+                in2 = f"[{fi+1}:v]"
+                if fi < n_clips - 2:
+                    fc_parts.append(f"{in1}{in2}xfade=transition=fade:duration={CF:.3f}:offset={offset:.3f}[v{fi}]")
+                else:
+                    fc_parts.append(f"{in1}{in2}xfade=transition=fade:duration={CF:.3f}:offset={offset:.3f}")
+            subprocess.run([
+                FFMPEG, "-y"] + inputs + [
+                "-filter_complex", ";".join(fc_parts),
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-preset", "fast", "-crf", "20",
+                str(d / "video_only.mp4")
+            ], check=True, capture_output=True, encoding="utf-8", errors="ignore")
+        shutil.rmtree(str(kb_dir), ignore_errors=True)
+
+        # Build SRT
         srt = d / "final.srt"
         time_offset = 0.0
         with open(str(srt), "w", encoding="utf-8") as f:
@@ -2349,7 +2767,9 @@ def _pipeline_i2v_generate(name):
                 f.write(f"{i+1}\n{ts(time_offset)} --> {ts(time_offset+dur)}\n{text}\n\n")
                 time_offset += dur
 
-        # Combine video + audio + subtitles
+        # Mux video + audio + burn subtitles
+        i2v_save(name, stage="generating", msg="烧录字幕、混流音频...",
+                 generate_progress=[n_items, n_items])
         srt_p = str(srt).replace("\\", "/").replace(":", "\\:")
         subprocess.run([
             FFMPEG, "-y",
@@ -2362,15 +2782,14 @@ def _pipeline_i2v_generate(name):
             "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
             "-shortest",
             str(d / "final.mp4")
-        ], check=True, capture_output=True, encoding='utf-8', errors='ignore')
+        ], check=True, capture_output=True, encoding="utf-8", errors="ignore")
 
-        # Cleanup temp files
         for f in [d/"video_only.mp4", d/"audio.wav"]:
             f.unlink(missing_ok=True)
 
         i2v_save(name, stage="done", msg="视频生成完成！")
     except Exception as e:
-        i2v_save(name, stage="error", msg=f"生成失败: {e}\n{traceback.format_exc()}")
+        i2v_save(name, stage="error", msg=f"合成失败: {e}\n{traceback.format_exc()}")
 
 # ═══════════════════════════════════════════════════════════════════
 # Video Conversion module
@@ -2419,7 +2838,7 @@ def api_converted_download(name, fmt):
     p = pd(name) / f"converted{cfg['ext']}"
     if not p.exists(): return ("", 404)
     return send_file(str(p), mimetype=cfg["mime"],
-                     as_attachment=True, attachment_filename=f"{name}{cfg['ext']}")
+                     as_attachment=True, download_name=f"{name}{cfg['ext']}")
 
 def _pipeline_convert(name, fmt, res):
     d = pd(name)
@@ -2496,6 +2915,34 @@ def api_tool_upload():
     return jsonify({"session_id": sid, "filename": file.filename,
                      "width": w, "height": h, "duration": round(dur, 2)})
 
+@app.route("/api/tool/list")
+def api_tool_list():
+    items = []
+    for d in TOOL_DIR.iterdir():
+        if not d.is_dir():
+            continue
+        sid = d.name
+        st = _tool_load_state(sid)
+        try:
+            p = _tool_input_video(sid)
+            size = p.stat().st_size
+        except FileNotFoundError:
+            continue
+        try:
+            mtime = d.stat().st_mtime
+        except OSError:
+            mtime = 0
+        items.append({
+            "sid": sid,
+            "filename": st.get("filename", "(未知)"),
+            "duration": st.get("duration", 0),
+            "size": size,
+            "mtime": mtime,
+            "stage": st.get("stage", ""),
+        })
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return jsonify(items)
+
 @app.route("/api/tool/<sid>/video")
 def api_tool_video(sid):
     try:
@@ -2503,6 +2950,17 @@ def api_tool_video(sid):
     except FileNotFoundError:
         return ("", 404)
     return send_file(str(p), mimetype="video/mp4")
+
+@app.route("/api/tool/<sid>/reset-result", methods=["POST"])
+def api_tool_reset_result(sid):
+    """Discard the chained result and start the next edit from the original input again."""
+    d = _tool_session(sid)
+    for f in ["result.mp4", "speedup_meta.json"]:
+        (d / f).unlink(missing_ok=True)
+    st = _tool_load_state(sid)
+    st.pop("result_file", None)
+    (d / "state.json").write_text(json.dumps(st, ensure_ascii=False), "utf-8")
+    return jsonify({"ok": True})
 
 @app.route("/api/tool/<sid>/state")
 def api_tool_state(sid):
@@ -2512,7 +2970,7 @@ def api_tool_state(sid):
 def api_tool_edit_delete(sid):
     ranges_text = request.json.get("ranges", "")
     ranges = []
-    for part in ranges_text.replace("；", ";").split(";"):
+    for part in re.split(r"[,;，；\n\r]+", ranges_text):
         part = part.strip()
         if not part: continue
         m = re.match(r"([\d:.]+)\s*[-~]\s*([\d:.]+)", part)
@@ -2527,7 +2985,7 @@ def api_tool_edit_delete(sid):
 
 @app.route("/api/tool/<sid>/edit/insert-video", methods=["POST"])
 def api_tool_edit_insert_video(sid):
-    pos = request.json.get("position", 0)
+    pos = float(request.form.get("position", 0))
     file = request.files.get("segment")
     if not file:
         return jsonify({"error": "请上传插入的视频"}), 400
@@ -2537,21 +2995,56 @@ def api_tool_edit_insert_video(sid):
     threading.Thread(target=_pipeline_tool_ve_insert, args=(sid, pos, "video"), daemon=True).start()
     return jsonify({"ok": True})
 
+@app.route("/api/tool/<sid>/edit/concat", methods=["POST"])
+def api_tool_edit_concat(sid):
+    files = request.files.getlist("segments")
+    if not files:
+        return jsonify({"error": "请选择要拼接的视频"}), 400
+    d = _tool_session(sid)
+    cat_dir = d / "_concat_tmp"
+    if cat_dir.exists():
+        shutil.rmtree(str(cat_dir), ignore_errors=True)
+    cat_dir.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for i, f in enumerate(files):
+        ext = Path(f.filename).suffix or ".mp4"
+        p = cat_dir / f"seg_{i:03d}{ext}"
+        f.save(str(p))
+        saved.append(str(p))
+    _tool_save_state(sid, stage="processing", msg=f"拼接 {len(saved)} 个视频...")
+    threading.Thread(target=_pipeline_tool_ve_concat, args=(sid, saved), daemon=True).start()
+    return jsonify({"ok": True})
+
 @app.route("/api/tool/<sid>/edit/insert-images", methods=["POST"])
 def api_tool_edit_insert_images(sid):
-    pos = float(request.form.get("position", 0))
-    subtitles = json.loads(request.form.get("subtitles", "[]"))
+    try:
+        positions = json.loads(request.form.get("positions", "[]"))
+        durations = json.loads(request.form.get("durations", "[]"))
+        subtitles = json.loads(request.form.get("subtitles", "[]"))
+    except (ValueError, TypeError):
+        return jsonify({"error": "参数格式错误"}), 400
     files = request.files.getlist("images")
     if not files:
         return jsonify({"error": "请上传图片"}), 400
+    n = len(files)
+    # Backfill any missing per-image fields with safe defaults
+    positions = [float(positions[i]) if i < len(positions) else 0.0 for i in range(n)]
+    durations = [max(0.5, float(durations[i])) if i < len(durations) else 3.0 for i in range(n)]
+    subtitles = [str(subtitles[i]) if i < len(subtitles) else "" for i in range(n)]
     d = _tool_session(sid)
     img_dir = d / "insert_images"
+    if img_dir.exists():
+        shutil.rmtree(str(img_dir), ignore_errors=True)
     img_dir.mkdir(exist_ok=True)
+    saved_imgs = []
     for i, f in enumerate(files):
-        f.save(str(img_dir / f"img_{i:03d}{Path(f.filename).suffix}"))
+        ext = Path(f.filename).suffix or ".png"
+        p = img_dir / f"img_{i:03d}{ext}"
+        f.save(str(p))
+        saved_imgs.append(p)
     _tool_save_state(sid, stage="processing", msg="图片视频生成中...")
-    threading.Thread(target=_pipeline_ve_insert_images,
-                     args=(None, pos, subtitles, False, sid), daemon=True).start()
+    threading.Thread(target=_pipeline_tool_ve_insert_images,
+                     args=(sid, saved_imgs, positions, durations, subtitles), daemon=True).start()
     return jsonify({"ok": True})
 
 @app.route("/api/tool/<sid>/convert", methods=["POST"])
@@ -2647,7 +3140,7 @@ def api_tool_download(sid):
     fname = cfg.get("filename", "video")
     base = Path(fname).stem
     return send_file(str(p), mimetype=mime, as_attachment=True,
-                     attachment_filename=f"{base}_output{p.suffix}")
+                     download_name=f"{base}_output{p.suffix}")
 
 @app.route("/api/tool/<sid>", methods=["DELETE"])
 def api_tool_delete(sid):
@@ -2665,10 +3158,55 @@ def _parse_ts(s):
         return int(parts[0]) * 60 + float(parts[1])
     return float(s)
 
+def _tool_replace_input(sid, src_path):
+    """Save src_path as the latest result.mp4, preserving the original input video.
+    Retries on Windows file locks (e.g. when the browser is still streaming the previous result)."""
+    import time
+    d = _tool_session(sid)
+    target = d / "result.mp4"
+    src = Path(src_path)
+    # Guard against callers that already wrote directly to result.mp4: there's
+    # nothing to rename, the file is already in place.
+    try:
+        if src.resolve() == target.resolve() and src.exists():
+            return
+    except OSError:
+        pass
+    if not src.exists():
+        raise RuntimeError(f"结果文件未生成: {src}")
+    last_err = None
+    for _ in range(20):  # ~8 seconds total
+        try:
+            if target.exists():
+                target.unlink()
+            src.rename(target)
+            return
+        except PermissionError as e:
+            last_err = e
+            time.sleep(0.4)
+    raise RuntimeError(f"结果文件被占用，请刷新页面或停止视频播放后重试: {last_err}")
+
+def _tool_result_video(sid):
+    """Path to the latest edit result, if any."""
+    d = _tool_session(sid)
+    p = d / "result.mp4"
+    if not p.exists():
+        raise FileNotFoundError("无结果文件")
+    return p
+
+def _tool_source_video(sid):
+    """The source for the next edit: the latest result if present, otherwise the original input.
+    This lets each operation chain onto the previous one's output."""
+    d = _tool_session(sid)
+    r = d / "result.mp4"
+    if r.exists():
+        return r
+    return _tool_input_video(sid)
+
 def _pipeline_tool_ve_delete(sid, ranges):
     d = _tool_session(sid)
     try:
-        inp = _tool_input_video(sid)
+        inp = _tool_source_video(sid)
         probe = subprocess.run([FFMPEG, "-i", str(inp)], capture_output=True, encoding='utf-8', errors='ignore')
         m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", probe.stderr or "")
         total = int(m.group(1))*3600 + int(m.group(2))*60 + float(m.group(3)) if m else 600
@@ -2690,60 +3228,185 @@ def _pipeline_tool_ve_delete(sid, ranges):
                            check=True, capture_output=True, encoding='utf-8', errors='ignore')
             seg_files.append(seg)
 
-        out = d / "result.mp4"
+        out = d / "_result_out.mp4"
         _ffmpeg_concat(seg_files, str(out))
         for f in seg_files: f.unlink(missing_ok=True)
 
         # Replace input with result for chaining edits
-        old = _tool_input_video(sid)
-        old.unlink(missing_ok=True)
-        out.rename(d / "input.mp4")
+        _tool_replace_input(sid, out)
 
-        _tool_save_state(sid, stage="done", msg="裁剪完成", result_file="input.mp4")
+        _tool_save_state(sid, stage="done", msg="裁剪完成", result_file="result.mp4")
     except Exception as e:
         _tool_save_state(sid, stage="error", msg=f"裁剪失败: {e}\n{traceback.format_exc()}")
+
+def _pipeline_tool_ve_insert_images(sid, image_paths, positions, durations, subtitles):
+    """Insert each image at its specified position in the OUTPUT timeline.
+    Original video content fills any gaps before / between / after images.
+    Positions are interpreted as where each image should appear in the final video.
+    If a position can't be honored (e.g. before the previous image's end), the image
+    is pushed to the next available slot."""
+    d = _tool_session(sid)
+    try:
+        inp = _tool_source_video(sid)
+        ow, oh, total_dur = _get_video_info(str(inp))
+
+        items = []
+        for i, img_p in enumerate(image_paths):
+            pos = max(0.0, float(positions[i]))
+            dur = max(0.5, float(durations[i]))
+            sub = subtitles[i] if i < len(subtitles) else ""
+            items.append({"idx": i, "img": img_p, "pos": pos, "dur": dur, "sub": sub})
+        # Sort by requested output position; ties broken by upload order
+        items.sort(key=lambda x: (x["pos"], x["idx"]))
+
+        clip_dir = d / "_iimg_clips"
+        if clip_dir.exists():
+            shutil.rmtree(str(clip_dir), ignore_errors=True)
+        clip_dir.mkdir(parents=True, exist_ok=True)
+        font_path = "C\\:/Windows/Fonts/msyh.ttc"  # ffmpeg-escaped Windows path
+
+        def _build_image_seg(img_p, dur, sub, out_path):
+            sub_safe = (sub or "").replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+            scale_vf = (f"scale={ow}:{oh}:force_original_aspect_ratio=decrease,"
+                        f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black,setsar=1")
+            vf = scale_vf
+            if sub_safe.strip():
+                vf += (f",drawtext=fontfile='{font_path}':text='{sub_safe}':"
+                       f"fontsize=36:fontcolor=white:borderw=3:bordercolor=black@0.8:"
+                       f"x=(w-text_w)/2:y=h-text_h-40")
+            subprocess.run([
+                FFMPEG, "-y",
+                "-loop", "1", "-i", str(img_p),
+                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                "-t", f"{dur:.3f}",
+                "-vf", vf, "-r", "25",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+                "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+                str(out_path),
+            ], check=True, capture_output=True, encoding="utf-8", errors="ignore")
+
+        clips = []
+        cursor = 0.0     # current OUTPUT timeline position
+        orig_used = 0.0  # how much of the original video has been consumed so far
+
+        for k, it in enumerate(items):
+            # Honor requested position, but never go backward in the output
+            target = max(cursor, it["pos"])
+            gap = target - cursor
+            orig_remaining = total_dur - orig_used
+            if gap > 0.05 and orig_remaining > 0.05:
+                used = min(gap, orig_remaining)
+                piece = clip_dir / f"src_{k:03d}.mp4"
+                _enc_for_concat(inp, piece, ow, oh, ss=orig_used, t=used)
+                clips.append(piece)
+                cursor += used
+                orig_used += used
+            # Place the image at the (possibly clamped) target
+            img_seg = clip_dir / f"img_{k:03d}.mp4"
+            _build_image_seg(it["img"], it["dur"], it["sub"], img_seg)
+            clips.append(img_seg)
+            cursor += it["dur"]
+
+        # Append any remaining original after the last image
+        if total_dur - orig_used > 0.05:
+            tail = clip_dir / "src_tail.mp4"
+            _enc_for_concat(inp, tail, ow, oh, ss=orig_used)
+            clips.append(tail)
+
+        if not clips:
+            raise ValueError("没有可拼接的片段")
+
+        _ffmpeg_concat([str(p) for p in clips], str(d / "_result_out.mp4"))
+
+        # Cleanup
+        shutil.rmtree(str(clip_dir), ignore_errors=True)
+        shutil.rmtree(str(d / "insert_images"), ignore_errors=True)
+
+        _tool_replace_input(sid, d / "_result_out.mp4")
+        _tool_save_state(sid, stage="done", msg="插入完成", result_file="result.mp4")
+    except subprocess.CalledProcessError as e:
+        err = (e.stderr or b"").decode("utf-8", "ignore")[-500:] if isinstance(e.stderr, bytes) else (e.stderr or "")[-500:]
+        _tool_save_state(sid, stage="error", msg=f"插入失败: ffmpeg 错误\n{err}")
+    except Exception as e:
+        _tool_save_state(sid, stage="error", msg=f"插入失败: {e}\n{traceback.format_exc()}")
 
 def _pipeline_tool_ve_insert(sid, pos, mode):
     d = _tool_session(sid)
     try:
-        inp = _tool_input_video(sid)
+        inp = _tool_source_video(sid)
         seg = str(d / "insert_segment.mp4")
         part1 = d / "_part1.mp4"
         part2 = d / "_part2.mp4"
-
-        ow, oh, _ = _get_video_info(str(inp))
-        vf = (f"scale={ow}:{oh}:force_original_aspect_ratio=decrease,"
-              f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black")
-        subprocess.run([FFMPEG, "-y", "-i", str(inp), "-t", str(pos),
-                        "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                        "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                        str(part1)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
-        subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(pos),
-                        "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                        "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                        str(part2)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
-
         seg_enc = d / "_seg_enc.mp4"
-        subprocess.run([FFMPEG, "-y", "-i", seg,
-                        "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                        "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                        str(seg_enc)], check=True, capture_output=True, encoding='utf-8', errors='ignore')
 
-        _ffmpeg_concat([part1, seg_enc, part2], str(d / "_result.mp4"))
-        for f in [part1, part2, seg_enc, d / "insert_segment.mp4"]: f.unlink(missing_ok=True)
+        ow, oh, total_dur = _get_video_info(str(inp))
+        pos = max(0.0, min(float(pos), total_dur))
+        segments = []
+        if pos > 0.05:
+            _enc_for_concat(inp, part1, ow, oh, t=pos)
+            segments.append(part1)
+        _enc_for_concat(seg, seg_enc, ow, oh)
+        segments.append(seg_enc)
+        if pos < total_dur - 0.05:
+            _enc_for_concat(inp, part2, ow, oh, ss=pos)
+            segments.append(part2)
 
-        old = _tool_input_video(sid)
-        old.unlink(missing_ok=True)
-        (d / "_result.mp4").rename(d / "input.mp4")
+        _ffmpeg_concat(segments, str(d / "_result.mp4"))
+        for f in [part1, part2, seg_enc, d / "insert_segment.mp4"]:
+            f.unlink(missing_ok=True)
 
-        _tool_save_state(sid, stage="done", msg="插入完成", result_file="input.mp4")
+        _tool_replace_input(sid, d / "_result.mp4")
+
+        _tool_save_state(sid, stage="done", msg="插入完成", result_file="result.mp4")
+    except subprocess.CalledProcessError as e:
+        err = (e.stderr or b"").decode("utf-8", "ignore")[-500:] if isinstance(e.stderr, bytes) else (e.stderr or "")[-500:]
+        _tool_save_state(sid, stage="error", msg=f"插入失败: ffmpeg 错误\n{err}")
     except Exception as e:
         _tool_save_state(sid, stage="error", msg=f"插入失败: {e}\n{traceback.format_exc()}")
+
+def _pipeline_tool_ve_concat(sid, segment_paths):
+    """Append one or more video segments to the current source. All segments are
+    re-encoded to match the main video's resolution, fps, and audio sample rate
+    so the final concat works regardless of input format."""
+    d = _tool_session(sid)
+    try:
+        inp = _tool_source_video(sid)
+        ow, oh, _ = _get_video_info(str(inp))
+
+        norm_dir = d / "_concat_norm"
+        if norm_dir.exists():
+            shutil.rmtree(str(norm_dir), ignore_errors=True)
+        norm_dir.mkdir(parents=True, exist_ok=True)
+
+        main_norm = norm_dir / "main.mp4"
+        _enc_for_concat(inp, main_norm, ow, oh)
+        normalized = [main_norm]
+        for i, src in enumerate(segment_paths):
+            out_p = norm_dir / f"seg_{i:03d}.mp4"
+            _enc_for_concat(src, out_p, ow, oh)
+            normalized.append(out_p)
+
+        out = d / "_concat_out.mp4"
+        _ffmpeg_concat([str(p) for p in normalized], str(out))
+
+        _tool_replace_input(sid, out)
+
+        # Cleanup
+        shutil.rmtree(str(norm_dir), ignore_errors=True)
+        shutil.rmtree(str(d / "_concat_tmp"), ignore_errors=True)
+
+        _tool_save_state(sid, stage="done", msg="拼接完成", result_file="result.mp4")
+    except subprocess.CalledProcessError as e:
+        err = (e.stderr or b"").decode("utf-8", "ignore")[-500:] if isinstance(e.stderr, bytes) else (e.stderr or "")[-500:]
+        _tool_save_state(sid, stage="error", msg=f"拼接失败: ffmpeg 错误\n{err}")
+    except Exception as e:
+        _tool_save_state(sid, stage="error", msg=f"拼接失败: {e}\n{traceback.format_exc()}")
 
 def _pipeline_tool_convert(sid, fmt, res):
     d = _tool_session(sid)
     try:
-        inp = _tool_input_video(sid)
+        inp = _tool_source_video(sid)
         cfg = FORMATS[fmt]
         out_name = f"converted{cfg['ext']}"
         out = d / out_name
@@ -2766,14 +3429,14 @@ def _pipeline_tool_convert(sid, fmt, res):
 def _pipeline_tool_speedup(sid, start, end, rate):
     d = _tool_session(sid)
     try:
-        inp = _tool_input_video(sid)
+        inp = _tool_source_video(sid)
         ow, oh, total_dur = _get_video_info(str(inp))
 
         part1 = d / "_sp_part1.mp4"
         part2 = d / "_sp_part2.mp4"
         speed_raw = d / "_sp_raw.mp4"
         speed_up = d / "_sp_fast.mp4"
-        out = d / "result.mp4"
+        out = d / "_result_out.mp4"
 
         vf = f"scale={ow}:{oh}:force_original_aspect_ratio=decrease,pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"
 
@@ -2814,22 +3477,24 @@ def _pipeline_tool_speedup(sid, start, end, rate):
                 "new_seg_duration": new_seg_dur}
         (d / "speedup_meta.json").write_text(json.dumps(meta), encoding="utf-8")
 
-        old = _tool_input_video(sid)
-        old.unlink(missing_ok=True)
-        out.rename(d / "input.mp4")
+        _tool_replace_input(sid, out)
 
         for f in [part1, part2, speed_raw, speed_up]:
             f.unlink(missing_ok=True)
 
         _tool_save_state(sid, stage="done", msg="变速完成！请录制新音频",
-                         result_file="input.mp4")
+                         result_file="result.mp4")
     except Exception as e:
         _tool_save_state(sid, stage="error", msg=f"变速失败: {e}\n{traceback.format_exc()}")
 
 def _pipeline_tool_speedup_merge(sid, audio_path):
     d = _tool_session(sid)
     try:
-        inp = _tool_input_video(sid)
+        # Speedup-merge chains from the previous speedup operation — read its result.
+        try:
+            inp = _tool_result_video(sid)
+        except FileNotFoundError:
+            inp = _tool_source_video(sid)
         meta = json.loads((d / "speedup_meta.json").read_text("utf-8"))
         new_start = meta["new_start"]
         new_end = meta["new_end"]
@@ -2840,7 +3505,7 @@ def _pipeline_tool_speedup_merge(sid, audio_path):
         part2 = d / "_sm_part2.mp4"
         speed_seg = d / "_sm_speed.mp4"
         merged_seg = d / "_sm_merged.mp4"
-        out = d / "result.mp4"
+        out = d / "_result_out.mp4"
 
         vf = f"scale={ow}:{oh}:force_original_aspect_ratio=decrease,pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"
 
@@ -2871,30 +3536,28 @@ def _pipeline_tool_speedup_merge(sid, audio_path):
             segments.append(part2)
         _ffmpeg_concat(segments, str(out))
 
-        old = _tool_input_video(sid)
-        old.unlink(missing_ok=True)
-        out.rename(d / "input.mp4")
+        _tool_replace_input(sid, out)
 
         for f in [part1, part2, speed_seg, merged_seg, d / "speedup_meta.json"]:
             f.unlink(missing_ok=True)
         Path(audio_path).unlink(missing_ok=True)
 
         _tool_save_state(sid, stage="done", msg="合成完成",
-                         result_file="input.mp4")
+                         result_file="result.mp4")
     except Exception as e:
         _tool_save_state(sid, stage="error", msg=f"合成失败: {e}\n{traceback.format_exc()}")
 
 def _pipeline_tool_replace_audio(sid, audio_path, start, end):
     d = _tool_session(sid)
     try:
-        inp = _tool_input_video(sid)
+        inp = _tool_source_video(sid)
         ow, oh, total_dur = _get_video_info(str(inp))
 
         part1 = d / "_ra_part1.mp4"
         part2 = d / "_ra_part2.mp4"
         seg_video = d / "_ra_seg.mp4"
         merged_seg = d / "_ra_merged.mp4"
-        out = d / "result.mp4"
+        out = d / "_result_out.mp4"
 
         vf = f"scale={ow}:{oh}:force_original_aspect_ratio=decrease,pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"
 
@@ -2931,16 +3594,14 @@ def _pipeline_tool_replace_audio(sid, audio_path, start, end):
         _ffmpeg_concat(segments, str(out))
 
         # Replace input
-        old = _tool_input_video(sid)
-        old.unlink(missing_ok=True)
-        out.rename(d / "input.mp4")
+        _tool_replace_input(sid, out)
 
         # Cleanup
         for f in [part1, part2, seg_video, merged_seg, Path(audio_path)]:
             f.unlink(missing_ok=True)
 
         _tool_save_state(sid, stage="done", msg="音频替换完成",
-                         result_file="input.mp4")
+                         result_file="result.mp4")
     except Exception as e:
         _tool_save_state(sid, stage="error", msg=f"替换失败: {e}\n{traceback.format_exc()}")
 

@@ -131,6 +131,36 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
 .rec-detail{flex:1;padding:20px;overflow-y:auto;display:flex;flex-direction:column}
 @keyframes countPulse{0%{transform:scale(1.4);opacity:0.5}50%{transform:scale(1);opacity:1}100%{transform:scale(0.95);opacity:0.8}}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* Video editor form */
+.ve-section{display:flex;flex-direction:column;gap:18px;padding:4px 2px}
+.ve-desc{color:#444;font-size:14px;line-height:1.55;margin:0}
+.ve-hint{color:#999;font-size:12px;line-height:1.5;margin:6px 0 0}
+.ve-field{display:flex;flex-direction:column;gap:6px}
+.ve-label{font-size:13px;color:#555;font-weight:500}
+.ve-input{width:100%;padding:10px 12px;border:1px solid #d8d8d8;border-radius:8px;font-size:14px;background:#fff;transition:border-color .15s,box-shadow .15s}
+.ve-input:focus{outline:none;border-color:#4a9eff;box-shadow:0 0 0 3px rgba(74,158,255,.12)}
+.ve-input.ve-num{width:140px}
+.ve-inline-row{display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap}
+.ve-inline-row .ve-field{min-width:120px}
+.ve-textarea{width:100%;padding:10px 12px;border:1px solid #d8d8d8;border-radius:8px;font-size:14px;line-height:1.55;font-family:inherit;resize:vertical;transition:border-color .15s,box-shadow .15s}
+.ve-textarea:focus{outline:none;border-color:#4a9eff;box-shadow:0 0 0 3px rgba(74,158,255,.12)}
+.ve-actions{display:flex;gap:8px;padding-top:4px;flex-wrap:wrap}
+.ve-file-zone{display:flex;align-items:center;gap:14px;padding:14px 18px;border:1.5px dashed #d0d0d0;border-radius:10px;background:#fafafa;cursor:pointer;transition:border-color .15s,background .15s,box-shadow .15s;min-height:64px}
+.ve-file-zone:hover{border-color:#4a9eff;background:#f0f7ff}
+.ve-file-zone.has-file{border-color:#2a9d3f;border-style:solid;background:#f3faf5}
+.ve-file-zone .ve-file-icon{font-size:24px;flex-shrink:0;line-height:1}
+.ve-file-zone .ve-file-text{flex:1;min-width:0}
+.ve-file-zone .ve-file-title{font-size:14px;color:#333;font-weight:500;margin-bottom:3px}
+.ve-file-zone .ve-file-name{font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ve-file-zone.has-file .ve-file-title{color:#2a9d3f}
+.ve-file-zone.has-file .ve-file-name{color:#2a7d2f}
+.ve-file-zone .ve-file-clear{font-size:13px;color:#999;padding:4px 8px;border-radius:4px;cursor:pointer;flex-shrink:0}
+.ve-file-zone .ve-file-clear:hover{background:rgba(0,0,0,.06);color:#d9534f}
+.ve-sub-panel{padding:14px 16px;background:#fafbfc;border-radius:10px;border:1px solid #eee;display:flex;flex-direction:column;gap:12px}
+.ve-sub-panel .ve-sub-title{font-size:13px;color:#555;font-weight:500;margin:0}
+.ve-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -237,6 +267,13 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <h2 style="margin-bottom:0">格式转换</h2>
       <button onclick="show('v-empty')" style="font-size:13px;padding:6px 14px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer">返回</button>
     </div>
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="margin:0;font-size:15px">我的视频</h3>
+        <button onclick="refreshToolList('convert')" style="font-size:12px;padding:4px 10px">🔄 刷新</button>
+      </div>
+      <div id="cv-list" style="font-size:13px"></div>
+    </div>
     <div class="card" id="cv-upload-area" style="margin-bottom:16px;text-align:center;padding:48px">
       <div style="font-size:48px;margin-bottom:12px">📁</div>
       <p style="color:#888;margin-bottom:16px">请上传要处理的视频文件</p>
@@ -281,6 +318,13 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <h2 style="margin-bottom:0">视频编辑</h2>
       <button onclick="show('v-empty')" style="font-size:13px;padding:6px 14px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer">返回</button>
     </div>
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="margin:0;font-size:15px">我的视频</h3>
+        <button onclick="refreshToolList('veditor')" style="font-size:12px;padding:4px 10px">🔄 刷新</button>
+      </div>
+      <div id="ve-list" style="font-size:13px"></div>
+    </div>
     <div class="card" id="ve-upload-area" style="margin-bottom:16px;text-align:center;padding:48px">
       <div style="font-size:48px;margin-bottom:12px">📁</div>
       <p style="color:#888;margin-bottom:16px">请上传要编辑的视频文件</p>
@@ -291,89 +335,168 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
       <video id="ve-video" controls style="width:100%;max-height:360px;display:block"></video>
     </div>
     <div id="ve-reupload-bar" style="display:none;margin-bottom:12px;text-align:right">
-      <button onclick="deleteToolVideo('veditor')" style="font-size:12px;padding:4px 12px;color:#d9534f;border-color:#d9534f">🗑 删除视频</button>
+      <button onclick="deleteToolVideo('veditor')" style="font-size:12px;padding:4px 12px;color:#d9534f;border-color:#d9534f">删除视频</button>
     </div>
     <div class="card" id="ve-op-area" style="display:none">
       <div class="tabs" style="margin-bottom:12px">
         <div class="tab active" onclick="showVETab('delete')" id="vet-tab-delete">删除片段</div>
         <div class="tab" onclick="showVETab('insert-video')" id="vet-tab-insert-video">插入片段</div>
         <div class="tab" onclick="showVETab('insert-images')" id="vet-tab-insert-images">插入图片</div>
+        <div class="tab" onclick="showVETab('concat')" id="vet-tab-concat">视频拼接</div>
         <div class="tab" onclick="showVETab('speedup')" id="vet-tab-speedup">变速剪辑</div>
         <div class="tab" onclick="showVETab('replace-audio')" id="vet-tab-replace-audio">音频替换</div>
       </div>
 
       <!-- Delete -->
-      <div id="vet-delete">
-        <p style="color:#888;margin-bottom:8px">输入要删除的时间段（秒），多个用逗号分隔</p>
-        <input type="text" id="ve-ranges" style="width:100%" placeholder="例: 10-11, 20-21, 30-32">
-        <p style="color:#aaa;font-size:12px;margin-top:4px">格式：起始秒-结束秒，如 10-11 表示删除第10到11秒</p>
-        <div class="btn-row"><button class="primary danger" onclick="veDelete()">删除指定片段</button></div>
+      <div id="vet-delete" class="ve-section">
+        <div>
+          <p class="ve-desc">删除视频中指定的时间段，多段可一次性删除。</p>
+        </div>
+        <div class="ve-field">
+          <label class="ve-label">时间段（秒）</label>
+          <input type="text" id="ve-ranges" class="ve-input" placeholder="例: 10-11, 20-21, 30-32">
+          <p class="ve-hint">格式：起始秒-结束秒。多段用逗号 / 分号分隔，如 <code style="background:#f0f0f0;padding:1px 5px;border-radius:3px">5-10, 20-30</code></p>
+        </div>
+        <div class="ve-actions">
+          <button class="primary danger" onclick="veDelete()">删除指定片段</button>
+        </div>
       </div>
 
       <!-- Insert Video -->
-      <div id="vet-insert-video" class="hidden">
-        <p style="color:#888;margin-bottom:8px">上传一段视频并指定插入位置 <span style="color:#aaa">(支持 MP4/AVI/MKV/MOV 等)</span></p>
-        <label style="display:block;margin:8px 0 4px">插入位置（秒）</label>
-        <input type="number" id="ve-ins-pos" style="width:120px" placeholder="0" min="0" step="0.1" value="0">
-        <label style="display:block;margin:12px 0 4px">选择视频文件</label>
-        <input type="file" id="ve-ins-file" accept="video/*,.avi,.mkv,.mov,.wmv,.flv,.webm,.ts" style="margin-bottom:8px">
-        <div class="btn-row"><button class="primary" onclick="veInsertVideo()">插入片段</button></div>
+      <div id="vet-insert-video" class="ve-section hidden">
+        <div>
+          <p class="ve-desc">在指定时间点插入一段额外的视频。</p>
+          <p class="ve-hint">支持 MP4 / AVI / MKV / MOV / WMV / FLV / WebM / TS</p>
+        </div>
+        <div class="ve-field">
+          <label class="ve-label">插入位置（秒）</label>
+          <input type="number" id="ve-ins-pos" class="ve-input ve-num" placeholder="0" min="0" step="0.1" value="0">
+        </div>
+        <div class="ve-field">
+          <label class="ve-label">视频文件</label>
+          <div class="ve-file-zone" id="ve-ins-zone" onclick="pickFile('ve-ins-file')">
+            <span class="ve-file-icon">🎬</span>
+            <div class="ve-file-text">
+              <div class="ve-file-title">点击选择视频</div>
+              <div class="ve-file-name" id="ve-ins-file-name">未选择文件</div>
+            </div>
+            <span class="ve-file-clear hidden" id="ve-ins-clear" onclick="clearFile(event,'ve-ins-file')">✕</span>
+          </div>
+          <input type="file" id="ve-ins-file" accept="video/*,.avi,.mkv,.mov,.wmv,.flv,.webm,.ts" style="display:none" onchange="onFilePicked(this,'ve-ins-file-name','ve-ins-zone','ve-ins-clear')">
+        </div>
+        <div class="ve-actions">
+          <button class="primary" onclick="veInsertVideo()">插入片段</button>
+        </div>
       </div>
 
       <!-- Insert Images -->
-      <div id="vet-insert-images" class="hidden">
-        <p style="color:#888;margin-bottom:8px">上传图片并提供字幕，系统将生成视频片段并插入</p>
-        <label style="display:block;margin:8px 0 4px">插入位置（秒）</label>
-        <input type="number" id="ve-img-pos" style="width:120px" placeholder="0" min="0" step="0.1" value="0">
-        <label style="display:block;margin:12px 0 4px">选择图片（可多选）</label>
-        <input type="file" id="ve-img-files" accept="image/*" multiple style="margin-bottom:8px">
-        <label style="display:block;margin:12px 0 4px">每张图片的字幕（一行一句，按图片顺序）</label>
-        <textarea id="ve-img-subs" rows="4" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;font-size:14px" placeholder="第一张图片的旁白&#10;第二张图片的旁白&#10;第三张图片的旁白"></textarea>
-        <div class="btn-row"><button class="primary" onclick="veInsertImages()">生成并插入</button></div>
+      <div id="vet-insert-images" class="ve-section hidden">
+        <div>
+          <p class="ve-desc">插入若干张图片到视频不同位置，每张图片可独立设置插入位置、播放时长和字幕。</p>
+        </div>
+        <div class="ve-field">
+          <label class="ve-label">图片文件（可多选）</label>
+          <div class="ve-file-zone" id="ve-img-zone" onclick="pickFile('ve-img-files')">
+            <span class="ve-file-icon">🖼️</span>
+            <div class="ve-file-text">
+              <div class="ve-file-title">点击选择图片</div>
+              <div class="ve-file-name" id="ve-img-file-name">未选择文件</div>
+            </div>
+            <span class="ve-file-clear hidden" id="ve-img-clear" onclick="clearFile(event,'ve-img-files')">✕</span>
+          </div>
+          <input type="file" id="ve-img-files" accept="image/*" multiple style="display:none" onchange="onFilePicked(this,'ve-img-file-name','ve-img-zone','ve-img-clear'); renderImageRows();">
+        </div>
+        <div id="ve-img-rows" style="display:flex;flex-direction:column;gap:10px"></div>
+        <div class="ve-actions">
+          <button class="primary" onclick="veInsertImages()">生成并插入</button>
+        </div>
+      </div>
+
+      <!-- Concat -->
+      <div id="vet-concat" class="ve-section hidden">
+        <div>
+          <p class="ve-desc">在主视频末尾拼接一个或多个视频片段。</p>
+          <p class="ve-hint">所有片段会自动缩放到主视频分辨率，按选择顺序拼接</p>
+        </div>
+        <div class="ve-field">
+          <label class="ve-label">视频片段（可多选）</label>
+          <div class="ve-file-zone" id="ve-cat-zone" onclick="pickFile('ve-cat-files')">
+            <span class="ve-file-icon">📼</span>
+            <div class="ve-file-text">
+              <div class="ve-file-title">点击选择要拼接的视频</div>
+              <div class="ve-file-name" id="ve-cat-file-name">未选择文件</div>
+            </div>
+            <span class="ve-file-clear hidden" id="ve-cat-clear" onclick="clearFile(event,'ve-cat-files')">✕</span>
+          </div>
+          <input type="file" id="ve-cat-files" accept="video/*,.avi,.mkv,.mov,.wmv,.flv,.webm,.ts" multiple style="display:none" onchange="onFilePicked(this,'ve-cat-file-name','ve-cat-zone','ve-cat-clear'); onConcatFilesChange();">
+          <div id="ve-cat-list" style="font-size:13px;color:#666"></div>
+        </div>
+        <div class="ve-actions">
+          <button class="primary" onclick="veConcat()">拼接视频</button>
+        </div>
       </div>
 
       <!-- Speed Up -->
-      <div id="vet-speedup" class="hidden">
-        <p style="color:#888;margin-bottom:8px">指定视频片段快进，去掉原音频，允许重新录制旁白</p>
-        <div style="display:flex;gap:12px;align-items:center;margin:8px 0">
-          <label>起始（秒）<input type="number" id="ve-speed-start" style="width:80px;margin-left:4px" placeholder="0" min="0" step="0.1" value="0"></label>
-          <label>结束（秒）<input type="number" id="ve-speed-end" style="width:80px;margin-left:4px" placeholder="10" min="0" step="0.1" value="10"></label>
-          <label>倍速
-            <select id="ve-speed-rate" style="margin-left:4px">
+      <div id="vet-speedup" class="ve-section hidden">
+        <div>
+          <p class="ve-desc">将指定片段快进，去掉原音频。完成后可录制新旁白再合成。</p>
+        </div>
+        <div class="ve-inline-row">
+          <div class="ve-field">
+            <label class="ve-label">起始（秒）</label>
+            <input type="number" id="ve-speed-start" class="ve-input ve-num" placeholder="0" min="0" step="0.1" value="0">
+          </div>
+          <div class="ve-field">
+            <label class="ve-label">结束（秒）</label>
+            <input type="number" id="ve-speed-end" class="ve-input ve-num" placeholder="10" min="0" step="0.1" value="10">
+          </div>
+          <div class="ve-field">
+            <label class="ve-label">倍速</label>
+            <select id="ve-speed-rate" class="ve-input ve-num">
               <option value="2">2x</option>
               <option value="4" selected>4x</option>
               <option value="8">8x</option>
               <option value="16">16x</option>
             </select>
-          </label>
+          </div>
         </div>
-        <p id="ve-speed-preview" style="color:#aaa;font-size:12px"></p>
-        <div class="btn-row"><button class="primary" onclick="veSpeedUp()">变速并去音频</button></div>
-        <div id="ve-speed-record" class="hidden" style="margin-top:16px;padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee">
-          <p style="color:#888;margin-bottom:8px">变速完成，请录制新的旁白音频：</p>
-          <div style="display:flex;gap:8px;align-items:center">
+        <p id="ve-speed-preview" class="ve-hint" style="margin:0"></p>
+        <div class="ve-actions">
+          <button class="primary" onclick="veSpeedUp()">变速并去音频</button>
+        </div>
+        <div id="ve-speed-record" class="hidden ve-sub-panel">
+          <p class="ve-sub-title">变速完成，请录制新的旁白音频：</p>
+          <div class="ve-row">
             <button id="ve-speed-rec-btn" class="primary" onclick="veSpeedRecord()">🎙 开始录音</button>
             <span id="ve-speed-rec-status" style="color:#888;font-size:13px"></span>
           </div>
-          <div id="ve-speed-rec-player" style="margin-top:8px;display:none">
+          <div id="ve-speed-rec-player" style="display:none">
             <audio id="ve-speed-audio" controls style="width:100%"></audio>
-            <div style="margin-top:8px"><button class="primary" onclick="veSpeedMerge()">合成视频</button></div>
+            <div class="ve-actions" style="margin-top:10px"><button class="primary" onclick="veSpeedMerge()">合成视频</button></div>
           </div>
         </div>
       </div>
 
       <!-- Replace Audio -->
-      <div id="vet-replace-audio" class="hidden">
-        <p style="color:#888;margin-bottom:8px">指定时间段，用新录制的音频替换原视频音频</p>
-        <div style="display:flex;gap:12px;align-items:center;margin:8px 0">
-          <label>起始（秒）<input type="number" id="ve-rep-start" style="width:80px;margin-left:4px" placeholder="0" min="0" step="0.1" value="0"></label>
-          <label>结束（秒）<input type="number" id="ve-rep-end" style="width:80px;margin-left:4px" placeholder="10" min="0" step="0.1" value="10"></label>
+      <div id="vet-replace-audio" class="ve-section hidden">
+        <div>
+          <p class="ve-desc">指定时间段，用新录制或上传的音频替换原视频音频。</p>
         </div>
-        <div style="margin-top:12px;padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #eee">
-          <p style="color:#888;margin-bottom:8px">录制或上传新音频：</p>
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <div class="ve-inline-row">
+          <div class="ve-field">
+            <label class="ve-label">起始（秒）</label>
+            <input type="number" id="ve-rep-start" class="ve-input ve-num" placeholder="0" min="0" step="0.1" value="0">
+          </div>
+          <div class="ve-field">
+            <label class="ve-label">结束（秒）</label>
+            <input type="number" id="ve-rep-end" class="ve-input ve-num" placeholder="10" min="0" step="0.1" value="10">
+          </div>
+        </div>
+        <div class="ve-sub-panel">
+          <p class="ve-sub-title">录制或上传新音频：</p>
+          <div class="ve-row">
             <button id="ve-rep-rec-btn" class="primary" onclick="veReplaceRecord()">🎙 开始录音</button>
-            <span style="color:#888">或</span>
+            <span style="color:#999">或</span>
             <input type="file" id="ve-rep-file" accept="audio/*" style="display:none" onchange="onReplaceAudioFile(this)">
             <button onclick="document.getElementById('ve-rep-file').click()">📁 上传音频</button>
             <span id="ve-rep-rec-status" style="color:#888;font-size:13px"></span>
@@ -382,13 +505,32 @@ input[type=text],input[type=password],input[type=number],select{padding:8px 12px
             <audio id="ve-rep-audio" controls style="width:100%"></audio>
           </div>
         </div>
-        <div class="btn-row" style="margin-top:12px"><button class="primary" onclick="veReplaceAudio()">替换音频</button></div>
+        <div class="ve-actions">
+          <button class="primary" onclick="veReplaceAudio()">替换音频</button>
+        </div>
       </div>
 
       <div id="ve-status" style="margin-top:12px;color:#888;font-size:13px"></div>
-      <div class="btn-row" style="margin-top:12px">
-        <button id="ve-download-btn" class="hidden" onclick="downloadToolResult()">⬇ 下载结果</button>
+    </div>
+    <div id="ve-result-area" style="display:none;margin-top:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div id="ve-result-bar" style="width:4px;height:18px;background:#2a9d3f;border-radius:2px"></div>
+        <h3 id="ve-result-title" style="margin:0;font-size:15px;color:#222">当前处理结果</h3>
+        <span id="ve-result-msg" style="color:#888;font-size:13px"></span>
+        <div style="flex:1"></div>
+        <div id="ve-result-buttons" style="display:flex;gap:6px">
+          <button onclick="resetToOriginal()" style="font-size:12px;padding:5px 12px">↺ 还原</button>
+          <button onclick="downloadToolResult()" style="font-size:12px;padding:5px 14px;background:#6c5ce7;color:#fff;border:1px solid #6c5ce7;border-radius:6px;cursor:pointer">⬇ 下载</button>
+        </div>
       </div>
+      <div style="background:#000;border-radius:8px;overflow:hidden;border:1px solid #e5e5e5;min-height:220px;position:relative">
+        <video id="ve-result-video" controls style="width:100%;max-height:420px;display:block"></video>
+        <div id="ve-result-loading" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;color:#e5e5e5;background:linear-gradient(135deg,#1a1a24,#262635)">
+          <div style="width:46px;height:46px;border:3px solid rgba(255,255,255,.18);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite"></div>
+          <p style="margin-top:14px;font-size:13px;letter-spacing:1px">处理中…</p>
+        </div>
+      </div>
+      <p id="ve-result-footer" style="color:#999;font-size:12px;margin:8px 0 0">下方所有操作会基于当前结果继续处理。点「还原」可回到原始视频。</p>
     </div>
   </div>
 
@@ -607,7 +749,7 @@ function renderFromState(st) {
   } else if(st.stage === 'cloning') {
     const prog = st.clone_progress || [0, 1];
     const pct = prog[1]>0 ? Math.round(prog[0]/prog[1]*100) : 0;
-    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'克隆录音中...'}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888">${prog[0]}/${prog[1]}</p></div>`;
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'克隆录音中...'}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div></div>`;
   } else if(st.stage === 'composing') {
     body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎬</div><p style="margin-top:12px">${st.msg||'生成中...'}</p></div>`;
   } else {
@@ -809,9 +951,15 @@ async function refreshWork() {
     const prog = st.clone_progress || [0, sentences.length];
     const pct = prog[1]>0 ? Math.round(prog[0]/prog[1]*100) : 0;
     const voiceName = currentCloneVoiceId ? (voiceLibrary.find(v=>v.id===currentCloneVoiceId)||{}).name||currentCloneVoiceId : '自定义音色';
-    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'克隆录音中...'}</p><p style="font-size:13px;color:#888;margin-top:4px">使用音色：${escHtml(voiceName)}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><p style="color:#888">${prog[0]}/${prog[1]}</p><div style="margin-top:12px;display:flex;gap:8px;justify-content:center"><button style="font-size:13px;color:#e04040;padding:6px 16px;border:1px solid #e04040;border-radius:6px;cursor:pointer;background:rgba(224,64,64,0.06)" onclick="cancelClone()">✕ 取消克隆</button><button style="font-size:13px;padding:6px 16px;border:1px solid #ccc;border-radius:6px;cursor:pointer" onclick="backFromError()">← 返回编辑字幕</button></div></div>`;
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎙</div><p style="margin-top:12px">${st.msg||'克隆录音中...'}</p><p style="font-size:13px;color:#888;margin-top:4px">使用音色：${escHtml(voiceName)}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:${pct}%"></div></div><div style="margin-top:12px;display:flex;gap:8px;justify-content:center"><button style="font-size:13px;color:#e04040;padding:6px 16px;border:1px solid #e04040;border-radius:6px;cursor:pointer;background:rgba(224,64,64,0.06)" onclick="cancelClone()">✕ 取消克隆</button><button style="font-size:13px;padding:6px 16px;border:1px solid #ccc;border-radius:6px;cursor:pointer" onclick="backFromError()">← 返回编辑字幕</button></div></div>`;
   } else if(st.stage === 'done') {
-        body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px">✅</div><h3 style="margin:12px 0">视频已生成</h3><a href="${API}/api/project/${curProj}/download" class="primary" style="display:inline-block;padding:12px 32px;text-decoration:none;border-radius:8px;background:#4a9eff;color:#fff">⬇ 下载最终视频</a><p style="margin-top:16px"><button onclick="curProj=null;show('v-empty')">返回</button></p></div>`;
+        body.innerHTML = `<div class="card" style="text-align:center;padding:32px">
+          <video controls preload="metadata" src="${API}/api/project/${encodeURIComponent(curProj)}/final-video?t=${Date.now()}" style="width:100%;max-width:720px;max-height:480px;background:#000;border-radius:8px;margin:0 auto 16px"></video>
+          <div style="display:flex;gap:12px;justify-content:center;align-items:center">
+            <a href="${API}/api/project/${curProj}/download" class="primary" style="display:inline-block;padding:12px 32px;text-decoration:none;border-radius:8px;background:#4a9eff;color:#fff">⬇ 下载最终视频</a>
+            <button onclick="curProj=null;show('v-empty')" style="padding:12px 32px">返回</button>
+          </div>
+        </div>`;
   } else if(st.stage === 'error') {
     body.innerHTML = `<div class="card" style="padding:24px;color:#d9534f"><b>错误：</b><br>${(st.msg||'').replace(/\n/g,'<br>')}</div><div style="margin-top:12px"><button onclick="backFromError()">← 返回编辑字幕</button></div>`;
   } else { body.innerHTML = ''; }
@@ -831,12 +979,27 @@ async function cancelClone() {
 
 function renderStages(stage) {
   const steps = [{k:'editing',l:'编辑'},{k:'recording',l:'录音'},{k:'composing',l:'生成'}];
-  let hit = false;
-  document.getElementById('stages').innerHTML = steps.map(s => {
-    const done = !hit && stage!==s.k;
-    const cls = stage===s.k?'active':(done?'done':'');
-    if(stage===s.k) hit=true;
-    const click = done ? ` onclick="goToStage('${s.k}')"` : '';
+  // Map each backend stage to which step it belongs to (so the bar only marks a
+  // step as "done" when the user has actually moved past it).
+  const stageToIdx = {
+    processing: -1,   // uploading / transcribing — before any step
+    editing: 0,
+    recording: 1,
+    cloning: 1,       // cloning happens within the recording phase
+    composing: 2,
+    done: 3,          // past everything → all steps done
+    error: -1,
+  };
+  const cur = stageToIdx.hasOwnProperty(stage) ? stageToIdx[stage] : -1;
+  document.getElementById('stages').innerHTML = steps.map((s, i) => {
+    let cls = '';
+    let click = '';
+    if (i === cur) {
+      cls = 'active';
+    } else if (i < cur) {
+      cls = 'done';
+      click = ` onclick="goToStage('${s.k}')"`;
+    }
     return `<div class="step ${cls}"${click}>${s.l}</div>`;
   }).join('');
 }
@@ -1324,7 +1487,7 @@ function showPreview(title, oldS, newS) {
       let leftHtml = '<div>';
       if(isRepeat) {
         // This is a split - show which part
-        const splitIndex = Array.from(limitedNewS.slice(0, newIdx + 1))
+        const splitIndex = Array.from(newS.slice(0, newIdx + 1))
           .filter(s => s.source && s.source[0] === sources[0])
           .length;
         const totalSplits = oldRefCount.get(sources[0]);
@@ -1677,7 +1840,10 @@ function renderRecorder(body) {
 function renderManualRec() {
   const idx=curIdx, total=sentences.length;
   const done = Object.keys(selectedSource).filter(k => parseInt(k) <= total).length;
-  let html = `<div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center"><span id="rec-progress-bar">已确认 <span style="color:#2a9d3f;font-weight:500">${done}</span> / ${total - deletedSet.size} 句${deletedSet.size?`（已删除 <span style="color:#d9534f">${deletedSet.size}</span> 句）`:''}</span><div style="display:flex;gap:8px"><button onclick="startAutoPlay()" style="font-size:12px;padding:6px 12px">▶ 自动播放</button><button onclick="stopAutoPlay()" style="font-size:12px;padding:6px 12px">⏸ 暂停</button><button class="primary" onclick="goToSubtitlePreview()" ${done < (total - deletedSet.size)?'disabled':''}>🎬 生成视频</button></div></div>`;
+  const acceptAllBtn = clonedSet.size > 0
+    ? `<button style="font-size:12px;padding:6px 12px;border:1px solid #2a9d3f;background:rgba(42,157,63,0.08);color:#2a9d3f;border-radius:6px;cursor:pointer" onclick="acceptAllClones()">✓ 一键接收所有克隆录音 (${clonedSet.size})</button>`
+    : '';
+  let html = `<div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center"><span id="rec-progress-bar">已确认 <span style="color:#2a9d3f;font-weight:500">${done}</span> / ${total - deletedSet.size} 句${deletedSet.size?`（已删除 <span style="color:#d9534f">${deletedSet.size}</span> 句）`:''}</span><div style="display:flex;gap:8px">${acceptAllBtn}<button onclick="startAutoPlay()" style="font-size:12px;padding:6px 12px">▶ 自动播放</button><button onclick="stopAutoPlay()" style="font-size:12px;padding:6px 12px">⏸ 暂停</button><button class="primary" onclick="goToSubtitlePreview()" ${done < (total - deletedSet.size)?'disabled':''}>🎬 生成视频</button></div></div>`;
   html += `<div class="rec-layout"><div class="rec-list" id="rec-list">`;
   for(let i=0;i<total;i++) {
     const confirmed = selectedSource[i+1];
@@ -2126,7 +2292,10 @@ async function acceptClone() {
   await fetch(API+'/api/project/'+curProj+'/select-source/'+(curIdx+1), {
     method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify({source:'clone'})});
-  recordedSet.add(curIdx+1); rejectedSet.delete(curIdx+1);
+  // Don't add to recordedSet — that set is for manual recordings only.
+  // accept-clone copies the clone file to s_<idx>.webm so the composer can read it,
+  // but the user hasn't actually recorded anything manually.
+  rejectedSet.delete(curIdx+1);
   updateRecListItem(curIdx); document.getElementById('rec-detail').innerHTML=renderRecDetail(); updateRecProgress();
 }
 async function selectSource(src) {
@@ -2477,6 +2646,17 @@ async function submitI2VNew() {
 async function openI2V(name) {
   curI2V = name; curProj = null;
   refreshProjects(); refreshI2VProjects();
+  // If project is in empty/reset state (image_count=0), show the new-project form instead
+  const st = await (await fetch(API+'/api/img2vid/'+name)).json();
+  if(st.stage === 'uploading' && (!st.image_count || st.image_count === 0)) {
+    show('v-i2v-new');
+    document.getElementById('i2v-name').value = name;
+    document.getElementById('i2v-name').readOnly = true;
+    document.getElementById('i2v-name').style.background = '#f5f5f5';
+    document.getElementById('i2v-theme').value = st.theme || '';
+    i2vFiles = []; renderI2VUploadPreview();
+    return;
+  }
   show('v-i2v-work');
   document.getElementById('i2v-title').textContent = name;
   await refreshI2VWork(); startI2VPoll();
@@ -2537,15 +2717,14 @@ async function resetCurI2V() {
     const ok = await showConfirm('警告：AI 任务运行中', `项目「${curI2V}」正在${st.stage==='analyzing'?'AI 分析':'视频生成'}中！\n\n清除数据将强制中断 AI 任务。\n\n确定要清空吗？`);
     if(!ok) return;
   } else {
-    if(!await showConfirm('清除数据', `确定清空项目「${curI2V}」的所有数据？\n\n将删除图片、旁白、声音样本和已生成的视频，回到新建状态。此操作不可撤销。`)) return;
+    if(!await showConfirm('清除数据', `确定清空项目「${curI2V}」的所有数据？\n\n将删除图片、旁白、声音样本和已生成的视频。此操作不可撤销。`)) return;
   }
   clearInterval(i2vPollTimer);
   await fetch(API+'/api/img2vid/'+curI2V+'/reset', {method:'POST'});
-  // Return to "new project" state with name + theme pre-filled
   const name = curI2V;
   const theme = st.theme || '';
   i2vImages = []; i2vNarration = []; i2vFiles = [];
-  // Switch to new-project view, keep curI2V so submitI2VNew knows we are continuing
+  // Go to new-project form with name pre-filled (read-only) and theme editable
   show('v-i2v-new');
   document.getElementById('i2v-name').value = name;
   document.getElementById('i2v-name').readOnly = true;
@@ -2566,14 +2745,42 @@ async function refreshI2VWork() {
     i2vImages = await (await fetch(API+'/api/img2vid/'+curI2V+'/images')).json();
     renderI2VImages(body, st);
   } else if(st.stage === 'analyzing') {
-    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">✨</div><p style="margin-top:12px">${st.msg||'AI 识别图片中...'}</p></div>`;
+    const prog = st.generate_progress || [0, 0];
+    const pct = prog[1] > 0 ? Math.round(prog[0] / prog[1] * 100) : 0;
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:36px">✨</div>
+      <p style="margin-top:12px">${escHtml(st.msg||'AI 识别图片中...')}</p>
+      <div class="progress-bar" style="max-width:400px;margin:12px auto">
+        <div class="fill" style="width:${pct}%;transition:width .3s"></div>
+      </div>
+    </div>`;
   } else if(st.stage === 'narration_ready') {
+    i2vImages = await (await fetch(API+'/api/img2vid/'+curI2V+'/images')).json();
     i2vNarration = await (await fetch(API+'/api/img2vid/'+curI2V+'/narration')).json();
     renderI2VNarration(body, st);
+  } else if(st.stage === 'audio_preview') {
+    i2vImages = await (await fetch(API+'/api/img2vid/'+curI2V+'/images')).json();
+    i2vNarration = await (await fetch(API+'/api/img2vid/'+curI2V+'/narration')).json();
+    renderI2VAudioPreview(body, st);
   } else if(st.stage === 'generating') {
-    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px">🎬</div><p style="margin-top:12px">${st.msg||'生成视频中...'}</p><div class="progress-bar" style="max-width:400px;margin:12px auto"><div class="fill" style="width:50%"></div></div></div>`;
+    const prog = st.generate_progress || [0, 0];
+    const pct = prog[1] > 0 ? Math.round(prog[0] / prog[1] * 100) : 0;
+    body.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:36px">🎬</div>
+      <p style="margin-top:12px">${escHtml(st.msg||'生成视频中...')}</p>
+      <div class="progress-bar" style="max-width:400px;margin:12px auto">
+        <div class="fill" style="width:${pct}%;transition:width .3s"></div>
+      </div>
+      ${prog[1] > 0 ? `<p style="font-size:13px;color:#888">${prog[0]} / ${prog[1]}</p>` : ''}
+    </div>`;
   } else if(st.stage === 'done') {
-    body.innerHTML = `<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px">✅</div><h3 style="margin:12px 0">视频已生成</h3><a href="${API}/api/img2vid/${curI2V}/download" class="primary" style="display:inline-block;padding:12px 32px;text-decoration:none;border-radius:8px;background:#6c5ce7;color:#fff">⬇ 下载视频 (MP4)</a><p style="margin-top:16px"><button onclick="curI2V=null;show('v-empty')">返回</button></p></div>`;
+    body.innerHTML = `<div class="card" style="text-align:center;padding:32px">
+      <div style="font-size:48px">✅</div>
+      <h3 style="margin:12px 0 16px">视频已生成</h3>
+      <video src="${API}/api/img2vid/${encodeURIComponent(curI2V)}/video?t=${Date.now()}" controls style="width:100%;max-width:720px;border-radius:8px;background:#000;display:block;margin:0 auto 20px"></video>
+      <a href="${API}/api/img2vid/${encodeURIComponent(curI2V)}/download" class="primary" style="display:inline-block;padding:12px 32px;text-decoration:none;border-radius:8px;background:#6c5ce7;color:#fff">⬇ 下载视频 (MP4)</a>
+      <p style="margin-top:16px"><button onclick="curI2V=null;show('v-empty')">返回</button></p>
+    </div>`;
   } else if(st.stage === 'error') {
     body.innerHTML = `<div class="card" style="padding:24px;color:#d9534f"><b>错误：</b><br>${(st.msg||'').replace(/\n/g,'<br>')}</div>`;
   } else {
@@ -2582,12 +2789,20 @@ async function refreshI2VWork() {
 }
 
 function renderI2VStages(stage) {
-  const steps = [{k:'uploading',l:'图片'},{k:'analyzing',l:'AI分析'},{k:'narration_ready',l:'旁白'},{k:'generating',l:'生成'}];
+  const steps = [{k:'uploading',l:'图片'},{k:'analyzing',l:'AI分析'},{k:'narration_ready',l:'旁白'},{k:'audio_preview',l:'配音试听'},{k:'generating',l:'合成视频'}];
   let hit = false;
   document.getElementById('i2v-stages').innerHTML = steps.map(s => {
     const cls = stage===s.k?'active':(hit?'':'done'); if(stage===s.k) hit=true;
-    return `<div class="step ${cls}">${s.l}</div>`;
+    const onclick = cls==='done' ? `onclick="jumpI2VStage('${s.k}')"` : '';
+    return `<div class="step ${cls}" ${onclick}>${s.l}</div>`;
   }).join('');
+}
+
+async function jumpI2VStage(targetStage) {
+  const allowed = ['uploading','narration_ready'];
+  if(!allowed.includes(targetStage)) return;
+  await fetch(API+'/api/img2vid/'+curI2V+'/stage', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({stage:targetStage})});
+  await refreshI2VWork();
 }
 
 function renderI2VImages(body, st) {
@@ -2670,20 +2885,70 @@ async function i2vMove(idx, dir) {
 }
 
 async function startI2VAnalyze() {
-  await fetch(API+'/api/img2vid/'+curI2V+'/analyze', {method:'POST'});
+  const style = document.getElementById('i2v-style')?.value || '';
+  await fetch(API+'/api/img2vid/'+curI2V+'/analyze', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({style})
+  });
   await refreshI2VWork();
+  startI2VPoll();
+}
+
+async function reanalyzeI2V() {
+  if(!curI2V) return;
+  const style = document.getElementById('i2v-style')?.value || '';
+  // Save current edits first
+  const tas = document.querySelectorAll('.i2v-body textarea');
+  tas.forEach((ta,i) => { if(i2vNarration[i]) i2vNarration[i].narration = ta.value; });
+  await fetch(API+'/api/img2vid/'+curI2V+'/narration', {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(i2vNarration)
+  });
+  await fetch(API+'/api/img2vid/'+curI2V+'/analyze', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({style})
+  });
+  await refreshI2VWork();
+  startI2VPoll();
 }
 
 function renderI2VNarration(body, st) {
-  let html = `<p style="margin-bottom:12px">AI 生成的旁白如下，可编辑每段文字。确认后生成视频。</p>`;
-  html += i2vNarration.map((n, i) =>
-    `<div style="margin-bottom:12px;padding:12px;background:#fafafa;border-radius:8px;border:1px solid #eee">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="background:#6c5ce7;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">图 ${n.image_idx+1}</span>
+  const curStyle = st.narration_style || '';
+  let html = `<p style="margin-bottom:12px">AI 生成的旁白如下，可编辑每段文字。确认后录制声音并生成视频。</p>`;
+  // Style selector + regenerate
+  html += `<div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+    <span style="font-weight:500;font-size:13px">旁白风格：</span>
+    <select id="i2v-style" style="padding:4px 8px;border-radius:6px">
+      <option value="">默认（口语化）</option>
+      <option value="documentary" ${curStyle==='documentary'?'selected':''}>纪录片旁白</option>
+      <option value="humor" ${curStyle==='humor'?'selected':''}>幽默风趣</option>
+      <option value="story" ${curStyle==='story'?'selected':''}>故事讲述</option>
+      <option value="educational" ${curStyle==='educational'?'selected':''}>科普解说</option>
+      <option value="product" ${curStyle==='product'?'selected':''}>产品介绍</option>
+      <option value="news" ${curStyle==='news'?'selected':''}>新闻报道</option>
+    </select>
+    <button onclick="reanalyzeI2V()" style="font-size:12px;padding:4px 12px">🔄 按此风格重新生成</button>
+  </div>`;
+  html += i2vNarration.map((n, i) => {
+    const img = i2vImages[n.image_idx] || i2vImages[i] || {};
+    const imgSrc = img.url ? `${API}${img.url}` : '';
+    const isSkipped = n.skipped;
+    const borderColor = isSkipped ? '#f0ad4e' : '#eee';
+    const bgColor = isSkipped ? '#fffbf0' : '#fafafa';
+    const warning = isSkipped ? `<div style="font-size:11px;color:#f0ad4e;margin-bottom:4px">⚠ 此图分析超时，旁白为自动填充，建议手动修改</div>` : '';
+    return `<div style="display:flex;gap:12px;padding:12px;background:${bgColor};border-radius:8px;border:1px solid ${borderColor};margin-bottom:12px;align-items:flex-start">
+      <div style="flex-shrink:0;width:160px">
+        ${imgSrc
+          ? `<img src="${imgSrc}" style="width:160px;height:100px;object-fit:cover;border-radius:6px;cursor:zoom-in;display:block" onclick="showImageZoom('${imgSrc}')">`
+          : '<div style="width:160px;height:100px;background:#eee;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:12px">无图片</div>'}
+        <div style="text-align:center;margin-top:4px;font-size:11px;color:#888">图 ${n.image_idx+1}</div>
       </div>
-      <textarea class="sent-row" data-i="${i}" rows="2" oninput="autoGrow(this)" style="width:100%">${escHtml(n.narration)}</textarea>
-    </div>`
-  ).join('');
+      <div style="flex:1;min-width:0">
+        ${warning}
+        <textarea class="sent-row" data-i="${i}" rows="3" oninput="autoGrow(this)" style="width:100%;min-height:80px;box-sizing:border-box">${escHtml(n.narration)}</textarea>
+      </div>
+    </div>`;
+  }).join('');
 
   html += `<div style="margin-top:20px;padding-top:20px;border-top:1px solid #eee">
     <p style="font-weight:500;margin-bottom:12px">声纹设置</p>
@@ -2702,10 +2967,58 @@ function renderI2VNarration(body, st) {
   </div>`;
 
   html += `<div style="margin-top:16px;display:flex;gap:8px">
-    <button class="primary" id="btn-i2v-generate" onclick="generateI2V()" style="background:#6c5ce7;border-color:#6c5ce7" disabled>🎬 生成视频</button>
+    <button class="primary" id="btn-i2v-preview" onclick="startI2VPreview()" style="background:#6c5ce7;border-color:#6c5ce7" disabled>🎙 预览配音</button>
   </div>`;
   body.innerHTML = html;
   body.querySelectorAll('textarea').forEach(autoGrow);
+  // Enable preview button if voice sample exists (checked from backend state)
+  updateI2VPreviewBtn(st);
+}
+
+function updateI2VPreviewBtn(st) {
+  const btn = document.getElementById('btn-i2v-preview');
+  if(!btn) return;
+  // Enable if voice is recorded OR if user explicitly wants default voice
+  const hasVoice = i2vVoiceBlob || (st && st.voice_ready);
+  btn.disabled = !hasVoice;
+  btn.textContent = hasVoice ? '🎙 预览配音' : '🎙 请先录制声音';
+}
+
+function renderI2VAudioPreview(body, st) {
+  const prog = st.generate_progress || [0, 0];
+  const pct = prog[1] > 0 ? Math.round(prog[0] / prog[1] * 100) : 0;
+  const isBusy = prog[0] < prog[1];
+  let html = `<p style="margin-bottom:12px">${isBusy ? '正在生成配音...' : '配音已生成，请逐句试听。确认无误后点击下方「合成视频」。'}</p>`;
+  if(isBusy) {
+    html += `<div class="progress-bar" style="max-width:400px;margin:12px 0"><div class="fill" style="width:${pct}%;transition:width .3s"></div></div>
+             <p style="font-size:13px;color:#888">${prog[0]} / ${prog[1]} · ${escHtml(st.msg||'')}</p>`;
+  } else {
+    html += i2vNarration.map((n, i) => {
+      const img = i2vImages[n.image_idx] || i2vImages[i] || {};
+      const imgSrc = img.url ? `${API}${img.url}` : '';
+      return `<div style="display:flex;gap:12px;padding:12px;background:#fafafa;border-radius:8px;border:1px solid #eee;margin-bottom:12px;align-items:flex-start">
+        <div style="flex-shrink:0;width:160px">
+          ${imgSrc ? `<img src="${imgSrc}" style="width:160px;height:100px;object-fit:cover;border-radius:6px;display:block">` : '<div style="width:160px;height:100px;background:#eee;border-radius:6px"></div>'}
+          <div style="text-align:center;margin-top:4px;font-size:11px;color:#888">图 ${n.image_idx+1}</div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <p style="margin:0 0 8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #eee;font-size:14px;line-height:1.5">${escHtml(n.narration)}</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <audio id="i2v-audio-${i}" src="${API}/api/img2vid/${encodeURIComponent(curI2V)}/audio/${i+1}?t=${Date.now()}" controls style="flex:1;height:32px"></audio>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    html += `<div style="margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;font-size:14px;cursor:pointer;user-select:none">
+        <input type="checkbox" id="i2v-anim-toggle" checked> 启用动画（推拉/平移效果）
+      </label>
+      <div style="flex:1"></div>
+      <button onclick="refreshI2VWork()">🔄 重新生成配音</button>
+      <button class="primary" onclick="generateI2V()" style="background:#2a9d3f;border-color:#2a9d3f">🎬 合成视频</button>
+    </div>`;
+  }
+  body.innerHTML = html;
 }
 
 let i2vVoiceRecording = false, i2vVoiceChunks = [], i2vVoiceBlob = null;
@@ -2725,7 +3038,8 @@ async function toggleI2VVoice() {
       document.getElementById('i2v-voice-status').textContent = '已录制';
       document.getElementById('i2v-voice-status').classList.add('ok');
       document.getElementById('i2v-voice-confirm').style.display = 'block';
-      document.getElementById('btn-i2v-generate').disabled = false;
+      const previewBtn = document.getElementById('btn-i2v-preview');
+      if(previewBtn) { previewBtn.disabled = false; previewBtn.textContent = '🎙 预览配音'; }
       // Auto-play for user to review
       p.play().catch(()=>{});
     };
@@ -2743,31 +3057,65 @@ function onI2VVoiceFile(e) {
   document.getElementById('i2v-voice-status').textContent = f.name;
   document.getElementById('i2v-voice-status').classList.add('ok');
   document.getElementById('i2v-voice-confirm').style.display = 'block';
-  document.getElementById('btn-i2v-generate').disabled = false;
+  const previewBtn = document.getElementById('btn-i2v-preview');
+  if(previewBtn) { previewBtn.disabled = false; previewBtn.textContent = '🎙 预览配音'; }
+}
+
+async function startI2VPreview() {
+  const btn = document.getElementById('btn-i2v-preview');
+  if(btn) { btn.disabled = true; btn.textContent = '⏳ 保存中...'; }
+  try {
+    // Save edited narration + voice sample
+    const tas = document.querySelectorAll('.i2v-body textarea, #i2v-body textarea');
+    tas.forEach((ta,i) => { if(i2vNarration[i]) i2vNarration[i].narration = ta.value; });
+    const r1 = await fetch(API+'/api/img2vid/'+curI2V+'/narration', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(i2vNarration)});
+    if(!r1.ok) throw new Error('保存旁白失败');
+    if(i2vVoiceBlob) {
+      const fd = new FormData(); fd.append('sample', i2vVoiceBlob, 'voice_sample.wav');
+      const r2 = await fetch(API+'/api/img2vid/'+curI2V+'/voice-sample', {method:'POST', body:fd});
+      if(!r2.ok) throw new Error('上传声纹失败');
+    }
+    const r3 = await fetch(API+'/api/img2vid/'+curI2V+'/preview-audio', {method:'POST'});
+    if(!r3.ok) throw new Error('启动预览失败');
+    await refreshI2VWork();
+    startI2VPoll();
+  } catch(e) {
+    toast('预览失败: '+e.message, 'error');
+    if(btn) { btn.disabled = false; btn.textContent = '🎙 预览配音'; }
+  }
 }
 
 async function generateI2V() {
-  // Save edited narration
-  const tas = document.querySelectorAll('.i2v-body textarea, #i2v-body textarea');
-  tas.forEach((ta,i) => { if(i2vNarration[i]) i2vNarration[i].narration = ta.value; });
-  await fetch(API+'/api/img2vid/'+curI2V+'/narration', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(i2vNarration)});
-
-  // Upload voice if recorded
-  if(i2vVoiceBlob) {
-    const fd = new FormData(); fd.append('sample', i2vVoiceBlob, 'voice_sample.wav');
-    await fetch(API+'/api/img2vid/'+curI2V+'/voice-sample', {method:'POST', body:fd});
+  try {
+    // Check if preview audio exists; if not, auto-generate first
+    const st = await (await fetch(API+'/api/img2vid/'+curI2V)).json();
+    const hasAudio = st.generate_progress && st.generate_progress[0] > 0 && st.generate_progress[0] >= st.generate_progress[1];
+    if(!hasAudio && st.stage !== 'done') {
+      toast('音频尚未生成，先进行预览配音...', 'warn');
+      await startI2VPreview();
+      return;
+    }
+    const animEl = document.getElementById('i2v-anim-toggle');
+    const animate = animEl ? animEl.checked : true;
+    await fetch(API+'/api/img2vid/'+curI2V+'/generate', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({animate})
+    });
+    await refreshI2VWork();
+    startI2VPoll();
+  } catch(e) {
+    toast('合成失败: '+e.message, 'error');
   }
-
-  // Start generation
-  await fetch(API+'/api/img2vid/'+curI2V+'/generate', {method:'POST'});
-  await refreshI2VWork();
 }
 
 function startI2VPoll() { clearInterval(i2vPollTimer); i2vPollTimer=setInterval(async()=>{
   if(!curI2V) return;
   const st=await(await fetch(API+'/api/img2vid/'+curI2V)).json();
-  if(st.stage==='analyzing'||st.stage==='generating') refreshI2VWork();
-  if(st.stage==='done'||st.stage==='error'||st.stage==='narration_ready'||st.stage==='uploading'){clearInterval(i2vPollTimer);refreshI2VWork();}
+  const prog=st.generate_progress||[0,0];
+  const audioDone=st.stage==='audio_preview'&&prog[1]>0&&prog[0]>=prog[1];
+  if((st.stage==='analyzing'||st.stage==='generating')||(st.stage==='audio_preview'&&!audioDone)) refreshI2VWork();
+  if(st.stage==='done'||st.stage==='error'||st.stage==='narration_ready'||st.stage==='uploading'||audioDone){clearInterval(i2vPollTimer);refreshI2VWork();}
 },2000); }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2785,6 +3133,7 @@ async function onToolUpload(input, tool) {
     const data = await r.json();
     if(data.error) { toast(data.error, 'error'); return; }
     toolSid = data.session_id;
+    resetToolInputs(tool);
     if(tool === 'convert') {
       document.getElementById('cv-upload-area').style.display = 'none';
       document.getElementById('cv-video-area').style.display = 'block';
@@ -2799,10 +3148,11 @@ async function onToolUpload(input, tool) {
       document.getElementById('ve-reupload-bar').style.display = 'block';
       document.getElementById('ve-op-area').style.display = 'block';
       document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video';
-      document.getElementById('ve-download-btn').classList.add('hidden');
+      hideToolResult('veditor');
       document.getElementById('ve-status').textContent = '';
     }
     toast('视频上传成功', 'success');
+    refreshToolList(tool);
   } catch(e) { toast('上传失败: '+e.message, 'error'); }
 }
 function downloadToolResult() {
@@ -2832,8 +3182,297 @@ async function deleteToolVideo(tool) {
     document.getElementById('ve-op-area').style.display = 'none';
     document.getElementById('ve-video').src = '';
     document.getElementById('ve-status').textContent = '';
-    document.getElementById('ve-download-btn').classList.add('hidden');
+    hideToolResult('veditor');
   }
+  refreshToolList(tool);
+}
+
+function _fmtToolSize(n) {
+  if(n < 1024) return n+' B';
+  if(n < 1024*1024) return (n/1024).toFixed(1)+' KB';
+  if(n < 1024*1024*1024) return (n/1024/1024).toFixed(1)+' MB';
+  return (n/1024/1024/1024).toFixed(2)+' GB';
+}
+function _fmtToolDur(s) {
+  if(!s || s < 0) return '';
+  const m = Math.floor(s/60), sec = Math.floor(s%60);
+  return m+':'+String(sec).padStart(2,'0');
+}
+function _fmtToolTime(ts) {
+  if(!ts) return '';
+  const d = new Date(ts*1000);
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function releaseToolVideo(tool) {
+  // Release the result <video> element so Windows can replace result.mp4 without lock errors.
+  // We do NOT release the original-video element (ve-video / cv-video) because the original
+  // input.mp4 is never modified by edits — clearing it would just make the preview blank.
+  if(tool === 'convert') return;
+  const el = document.getElementById('ve-result-video');
+  if(el) {
+    try { el.pause(); } catch(e) {}
+    if(el.getAttribute('src')) {
+      el.removeAttribute('src');
+      try { el.load(); } catch(e) {}
+    }
+  }
+  // Replace the dark video box with a loading spinner so the user has feedback
+  setToolResultLoading('veditor', true);
+}
+
+function setToolResultLoading(tool, isLoading) {
+  if(tool === 'convert') return;
+  const area = document.getElementById('ve-result-area');
+  const vid = document.getElementById('ve-result-video');
+  const loading = document.getElementById('ve-result-loading');
+  const buttons = document.getElementById('ve-result-buttons');
+  const footer = document.getElementById('ve-result-footer');
+  const title = document.getElementById('ve-result-title');
+  const bar = document.getElementById('ve-result-bar');
+  const msg = document.getElementById('ve-result-msg');
+  if(!area) return;
+  if(isLoading) {
+    area.style.display = 'block';
+    if(vid) vid.style.display = 'none';
+    if(loading) loading.style.display = 'flex';
+    if(buttons) buttons.style.display = 'none';
+    if(footer) footer.style.display = 'none';
+    if(title) title.textContent = '处理中…';
+    if(bar) bar.style.background = '#f0ad4e';
+    if(msg) msg.textContent = '';
+    area.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  } else {
+    if(vid) vid.style.display = 'block';
+    if(loading) loading.style.display = 'none';
+    if(buttons) buttons.style.display = 'flex';
+    if(footer) footer.style.display = 'block';
+    if(title) title.textContent = '当前处理结果';
+    if(bar) bar.style.background = '#2a9d3f';
+  }
+}
+
+// File picker helpers — keep the native <input type=file> hidden and drive
+// it through a styled drop zone.
+function pickFile(inputId) {
+  const el = document.getElementById(inputId);
+  if(el) el.click();
+}
+function clearFile(ev, inputId) {
+  ev.stopPropagation();
+  const el = document.getElementById(inputId);
+  if(!el) return;
+  el.value = '';
+  el.dispatchEvent(new Event('change'));
+}
+function onFilePicked(input, nameId, zoneId, clearId) {
+  const nameEl = document.getElementById(nameId);
+  const zoneEl = zoneId ? document.getElementById(zoneId) : null;
+  const clearEl = clearId ? document.getElementById(clearId) : null;
+  const files = input.files;
+  if(!files || !files.length) {
+    if(nameEl) nameEl.textContent = '未选择文件';
+    if(zoneEl) zoneEl.classList.remove('has-file');
+    if(clearEl) clearEl.classList.add('hidden');
+    return;
+  }
+  if(nameEl) {
+    if(files.length === 1) {
+      const f = files[0];
+      nameEl.textContent = f.name + '  (' + (f.size/1024/1024).toFixed(1) + ' MB)';
+    } else {
+      const total = Array.from(files).reduce((a,f)=>a+f.size, 0);
+      nameEl.textContent = '已选 ' + files.length + ' 个文件，共 ' + (total/1024/1024).toFixed(1) + ' MB';
+    }
+  }
+  if(zoneEl) zoneEl.classList.add('has-file');
+  if(clearEl) clearEl.classList.remove('hidden');
+}
+
+function showToolResult(tool, msg) {
+  // Reveal the result video below the original. Only veditor has a result panel.
+  if(tool === 'convert') return;
+  setToolResultLoading('veditor', false);
+  const area = document.getElementById('ve-result-area');
+  const vid = document.getElementById('ve-result-video');
+  const msgEl = document.getElementById('ve-result-msg');
+  if(!area || !vid) return;
+  area.style.display = 'block';
+  vid.src = API + '/api/tool/' + toolSid + '/result?t=' + Date.now();
+  if(msgEl) msgEl.textContent = msg || '';
+  area.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+function hideToolResult(tool) {
+  if(tool === 'convert') return;
+  setToolResultLoading('veditor', false);
+  const area = document.getElementById('ve-result-area');
+  const vid = document.getElementById('ve-result-video');
+  if(!area) return;
+  area.style.display = 'none';
+  if(vid) {
+    try { vid.pause(); } catch(e) {}
+    vid.removeAttribute('src');
+    try { vid.load(); } catch(e) {}
+  }
+}
+
+function dismissToolResult(tool) { hideToolResult(tool); }
+
+async function resetToOriginal() {
+  if(!toolSid) return;
+  if(!await showConfirm('还原到原视频', '将丢弃当前结果，后续操作回到从原始视频开始。确定继续？')) return;
+  try {
+    await fetch(API+'/api/tool/'+toolSid+'/reset-result', {method:'POST'});
+    hideToolResult('veditor');
+    const status = document.getElementById('ve-status');
+    if(status) status.textContent = '';
+    toast('已还原为原视频', 'success');
+  } catch(e) { toast('还原失败: '+e.message, 'error'); }
+}
+
+function resetToolInputs(tool) {
+  // Clear edit form fields so switching sessions doesn't carry stale input.
+  const setVal = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
+  const resetFileZone = (inputId, nameId, zoneId, clearId) => {
+    setVal(inputId, '');
+    const nameEl = document.getElementById(nameId); if(nameEl) nameEl.textContent = '未选择文件';
+    const zoneEl = document.getElementById(zoneId); if(zoneEl) zoneEl.classList.remove('has-file');
+    const clearEl = document.getElementById(clearId); if(clearEl) clearEl.classList.add('hidden');
+  };
+  if(tool === 'veditor') {
+    setVal('ve-ranges', '');
+    setVal('ve-ins-pos', 0);
+    resetFileZone('ve-ins-file', 've-ins-file-name', 've-ins-zone', 've-ins-clear');
+    resetFileZone('ve-img-files', 've-img-file-name', 've-img-zone', 've-img-clear');
+    const imgRows = document.getElementById('ve-img-rows'); if(imgRows) imgRows.innerHTML = '';
+    setVal('ve-speed-start', 0);
+    setVal('ve-speed-end', 10);
+    setVal('ve-rep-start', 0);
+    setVal('ve-rep-end', 10);
+    const repFile = document.getElementById('ve-rep-file'); if(repFile) repFile.value = '';
+    resetFileZone('ve-cat-files', 've-cat-file-name', 've-cat-zone', 've-cat-clear');
+    const catList = document.getElementById('ve-cat-list'); if(catList) catList.innerHTML = '';
+    const status = document.getElementById('ve-status'); if(status) status.textContent = '';
+    const repStatus = document.getElementById('ve-rep-rec-status'); if(repStatus) repStatus.textContent = '';
+    const repPlayer = document.getElementById('ve-rep-player'); if(repPlayer) repPlayer.style.display = 'none';
+  } else if(tool === 'convert') {
+    const status = document.getElementById('cv-status'); if(status) status.textContent = '';
+  }
+}
+
+function clearOpInputs(op) {
+  // Reset the input fields for a single operation after it completes successfully.
+  // Status text and result preview are intentionally left alone.
+  const setVal = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
+  const resetFileZone = (inputId, nameId, zoneId, clearId) => {
+    setVal(inputId, '');
+    const nameEl = document.getElementById(nameId); if(nameEl) nameEl.textContent = '未选择文件';
+    const zoneEl = document.getElementById(zoneId); if(zoneEl) zoneEl.classList.remove('has-file');
+    const clearEl = document.getElementById(clearId); if(clearEl) clearEl.classList.add('hidden');
+  };
+  switch(op) {
+    case 'delete':
+      setVal('ve-ranges', '');
+      break;
+    case 'insert-video':
+      setVal('ve-ins-pos', 0);
+      resetFileZone('ve-ins-file', 've-ins-file-name', 've-ins-zone', 've-ins-clear');
+      break;
+    case 'insert-images':
+      resetFileZone('ve-img-files', 've-img-file-name', 've-img-zone', 've-img-clear');
+      const imgRows = document.getElementById('ve-img-rows'); if(imgRows) imgRows.innerHTML = '';
+      break;
+    case 'concat':
+      resetFileZone('ve-cat-files', 've-cat-file-name', 've-cat-zone', 've-cat-clear');
+      const catList = document.getElementById('ve-cat-list'); if(catList) catList.innerHTML = '';
+      break;
+    case 'speedup-merge':
+      // Final step of speedup chain: reset everything related
+      setVal('ve-speed-start', 0);
+      setVal('ve-speed-end', 10);
+      const speedAudio = document.getElementById('ve-speed-audio'); if(speedAudio) { try{ speedAudio.pause(); }catch(e){} speedAudio.removeAttribute('src'); }
+      const speedPlayer = document.getElementById('ve-speed-rec-player'); if(speedPlayer) speedPlayer.style.display = 'none';
+      const speedStatus = document.getElementById('ve-speed-rec-status'); if(speedStatus) speedStatus.textContent = '';
+      break;
+    case 'replace-audio':
+      setVal('ve-rep-start', 0);
+      setVal('ve-rep-end', 10);
+      const repFile = document.getElementById('ve-rep-file'); if(repFile) repFile.value = '';
+      const repAudio = document.getElementById('ve-rep-audio'); if(repAudio) { try{ repAudio.pause(); }catch(e){} repAudio.removeAttribute('src'); }
+      const repPlayer = document.getElementById('ve-rep-player'); if(repPlayer) repPlayer.style.display = 'none';
+      const repStatus = document.getElementById('ve-rep-rec-status'); if(repStatus) repStatus.textContent = '';
+      break;
+  }
+}
+async function refreshToolList(tool) {
+  const containerId = tool === 'convert' ? 'cv-list' : 've-list';
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  try {
+    const items = await (await fetch(API+'/api/tool/list')).json();
+    if(!items.length) {
+      el.innerHTML = `<p style="color:#999;margin:8px 0;font-size:13px">暂无上传的视频</p>`;
+      return;
+    }
+    el.innerHTML = items.map(it => {
+      const isCur = it.sid === toolSid;
+      const fname = escHtml(it.filename || '(未知)');
+      const meta = [_fmtToolSize(it.size), _fmtToolDur(it.duration), _fmtToolTime(it.mtime)].filter(Boolean).join(' · ');
+      const action = isCur
+        ? `<span style="font-size:12px;color:#2a9d3f;padding:4px 10px;background:#e8f5e9;border-radius:4px">正在使用</span>`
+        : `<button onclick="useToolSession('${tool}','${it.sid}')" style="font-size:12px;padding:4px 10px;margin-right:6px">使用</button>
+           <button onclick="deleteToolSession('${tool}','${it.sid}')" style="font-size:12px;padding:4px 10px;color:#d9534f;border-color:#d9534f">删除</button>`;
+      return `<div style="display:flex;align-items:center;gap:12px;padding:8px 4px;border-bottom:1px solid #eee">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fname}</div>
+          <div style="color:#888;font-size:12px;margin-top:2px">${escHtml(meta)}</div>
+        </div>
+        <div style="flex-shrink:0">${action}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<p style="color:#d9534f;font-size:13px">加载失败：${escHtml(e.message)}</p>`;
+  }
+}
+
+async function useToolSession(tool, sid) {
+  toolSid = sid;
+  hideToolResult(tool);
+  resetToolInputs(tool);
+  if(tool === 'convert') {
+    document.getElementById('cv-upload-area').style.display = 'none';
+    document.getElementById('cv-video-area').style.display = 'block';
+    document.getElementById('cv-reupload-bar').style.display = 'block';
+    document.getElementById('cv-op-area').style.display = 'block';
+    document.getElementById('cv-video').src = API + '/api/tool/' + toolSid + '/video?t=' + Date.now();
+    document.getElementById('cv-download-btn').classList.add('hidden');
+  } else {
+    document.getElementById('ve-upload-area').style.display = 'none';
+    document.getElementById('ve-video-area').style.display = 'block';
+    document.getElementById('ve-reupload-bar').style.display = 'block';
+    document.getElementById('ve-op-area').style.display = 'block';
+    document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t=' + Date.now();
+    // If this session has a previous result on disk, re-surface it
+    try {
+      const st = await (await fetch(API+'/api/tool/'+toolSid+'/state')).json();
+      if(st && st.result_file === 'result.mp4') showToolResult('veditor', '上次的编辑结果');
+    } catch(e) {}
+  }
+  refreshToolList(tool);
+}
+
+async function deleteToolSession(tool, sid) {
+  if(sid === toolSid) {
+    toast('该视频正在使用中，请先在编辑器中点击「删除视频」', 'warn');
+    return;
+  }
+  if(!await showConfirm('删除视频', '确定删除该视频？所有相关编辑进度将丢失，本地原文件不受影响。')) return;
+  try {
+    await fetch(API+'/api/tool/'+sid, {method:'DELETE'});
+    toast('视频已删除', 'success');
+  } catch(e) { toast('删除失败: '+e.message, 'error'); }
+  refreshToolList(tool);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2845,9 +3484,10 @@ function showConvert() {
   document.getElementById('cv-video-area').style.display = 'none';
   document.getElementById('cv-op-area').style.display = 'none';
   document.getElementById('cv-video').src = '';
-  document.getElementById('cv-status').textContent = '';
   document.getElementById('cv-download-btn').classList.add('hidden');
+  resetToolInputs('convert');
   show('v-convert');
+  refreshToolList('convert');
 }
 async function startConvert() {
   if(!toolSid) return toast('请先上传视频', 'warn');
@@ -2855,6 +3495,7 @@ async function startConvert() {
   const fmt = document.getElementById('cv-format').value;
   const res = document.getElementById('cv-res').value;
   lockTask(toolSid, 'convert');
+  releaseToolVideo('convert');
   updateTaskBar('格式转换中...', 30);
   document.getElementById('cv-status').textContent = '处理中...';
   try {
@@ -2890,15 +3531,22 @@ function showVEditor() {
   document.getElementById('ve-video-area').style.display = 'none';
   document.getElementById('ve-op-area').style.display = 'none';
   document.getElementById('ve-video').src = '';
-  document.getElementById('ve-status').textContent = '';
-  document.getElementById('ve-download-btn').classList.add('hidden');
+  hideToolResult('veditor');
+  resetToolInputs('veditor');
   show('v-veditor');
+  refreshToolList('veditor');
 }
 function showVETab(tab) {
-  ['delete','insert-video','insert-images','speedup','replace-audio'].forEach(t => {
-    document.getElementById('vet-tab-'+t).classList.toggle('active', t===tab);
-    document.getElementById('vet-'+t).classList.toggle('hidden', t!==tab);
+  ['delete','insert-video','insert-images','speedup','replace-audio','concat'].forEach(t => {
+    const tabBtn = document.getElementById('vet-tab-'+t);
+    const tabPane = document.getElementById('vet-'+t);
+    if(tabBtn) tabBtn.classList.toggle('active', t===tab);
+    if(tabPane) tabPane.classList.toggle('hidden', t!==tab);
   });
+  // Status text is per-operation, not per-tab: clear it when switching tabs
+  // so a previous "裁剪完成" doesn't linger in another tab.
+  const status = document.getElementById('ve-status');
+  if(status) status.innerHTML = '';
 }
 
 async function veDelete() {
@@ -2907,6 +3555,7 @@ async function veDelete() {
   const ranges = document.getElementById('ve-ranges').value;
   if(!ranges.trim()) return toast('请输入要删除的时间段', 'warn');
   lockTask(toolSid, 've_delete');
+  releaseToolVideo('veditor');
   updateTaskBar('视频裁剪中...', 30);
   document.getElementById('ve-status').textContent = '处理中...';
   try {
@@ -2921,8 +3570,8 @@ async function veDelete() {
       if(st.stage==='done') {
         clearInterval(pollId);
         document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 裁剪完成！</span>';
-        document.getElementById('ve-download-btn').classList.remove('hidden');
-        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        showToolResult('veditor');
+        clearOpInputs('delete');
         updateTaskBar('完成', 100);
         setTimeout(()=>unlockTask(), 1500);
       } else if(st.stage==='error') {
@@ -2941,6 +3590,7 @@ async function veInsertVideo() {
   const file = document.getElementById('ve-ins-file').files[0];
   if(!file) return toast('请选择视频文件', 'warn');
   lockTask(toolSid, 've_insert');
+  releaseToolVideo('veditor');
   updateTaskBar('插入片段中...', 30);
   document.getElementById('ve-status').textContent = '处理中...';
   try {
@@ -2955,8 +3605,8 @@ async function veInsertVideo() {
       if(st.stage==='done') {
         clearInterval(pollId);
         document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 插入完成！</span>';
-        document.getElementById('ve-download-btn').classList.remove('hidden');
-        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        showToolResult('veditor');
+        clearOpInputs('insert-video');
         updateTaskBar('完成', 100);
         setTimeout(()=>unlockTask(), 1500);
       } else if(st.stage==='error') {
@@ -2968,25 +3618,108 @@ async function veInsertVideo() {
   } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
 }
 
+function renderImageRows() {
+  const files = document.getElementById('ve-img-files').files;
+  const wrap = document.getElementById('ve-img-rows');
+  if(!wrap) return;
+  if(!files.length) { wrap.innerHTML = ''; return; }
+  const DEFAULT_DUR = 3;
+  const rows = Array.from(files).map((f, i) => {
+    const url = URL.createObjectURL(f);
+    // Stagger defaults so images are placed back-to-back, never colliding by default
+    const defaultPos = i * DEFAULT_DUR;
+    return `<div class="ve-img-row" data-idx="${i}" style="display:flex;gap:12px;padding:10px;border:1px solid #eee;border-radius:8px;background:#fafbfc;align-items:flex-start;transition:border-color .15s,background .15s">
+      <img src="${url}" style="width:80px;height:60px;object-fit:cover;border-radius:6px;background:#000;flex-shrink:0">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:13px;color:#333;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i+1}. ${escHtml(f.name)}</div>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:6px">
+            插入位置（秒）<input type="number" class="ve-input ve-img-pos" data-idx="${i}" min="0" step="0.1" value="${defaultPos}" style="width:80px;padding:6px 8px" oninput="validateImageRows()">
+          </label>
+          <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:6px">
+            播放时长（秒）<input type="number" class="ve-input ve-img-dur" data-idx="${i}" min="0.5" step="0.5" value="${DEFAULT_DUR}" style="width:80px;padding:6px 8px" oninput="validateImageRows()">
+          </label>
+        </div>
+        <input type="text" class="ve-input ve-img-sub" data-idx="${i}" placeholder="此图字幕（可留空）" style="font-size:13px;padding:8px 10px">
+      </div>
+    </div>`;
+  });
+  wrap.innerHTML = rows.join('') + `<div id="ve-img-warn" style="display:none;padding:10px 12px;border-radius:8px;background:#fff5f5;border:1px solid #f8c1c1;color:#a72121;font-size:13px"></div>`;
+  validateImageRows();
+}
+
+function validateImageRows() {
+  const rows = Array.from(document.querySelectorAll('#ve-img-rows .ve-img-row'));
+  if(!rows.length) return true;
+  const items = rows.map((row, i) => {
+    const pos = Math.max(0, parseFloat(row.querySelector('.ve-img-pos').value) || 0);
+    const dur = Math.max(0.5, parseFloat(row.querySelector('.ve-img-dur').value) || 3);
+    return { row, idx: i, label: i + 1, start: pos, end: pos + dur };
+  });
+  const conflictSet = new Set();
+  const conflictPairs = [];
+  // Pairwise overlap on the original timeline (half-open intervals; touching is OK)
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      if (a.start < b.end && b.start < a.end) {
+        conflictSet.add(a.idx);
+        conflictSet.add(b.idx);
+        conflictPairs.push([a.label, b.label, a.start, a.end, b.start, b.end]);
+      }
+    }
+  }
+  for (const it of items) {
+    if (conflictSet.has(it.idx)) {
+      it.row.style.borderColor = '#d9534f';
+      it.row.style.background = '#fff5f5';
+    } else {
+      it.row.style.borderColor = '#eee';
+      it.row.style.background = '#fafbfc';
+    }
+  }
+  const warn = document.getElementById('ve-img-warn');
+  if (warn) {
+    if (conflictPairs.length) {
+      const lines = conflictPairs.map(([a, b, as, ae, bs, be]) =>
+        `图片 ${a} [${as.toFixed(1)}–${ae.toFixed(1)}s] 与 图片 ${b} [${bs.toFixed(1)}–${be.toFixed(1)}s] 时间重叠`);
+      warn.innerHTML = '⚠️ 时间冲突：<br>' + lines.join('<br>');
+      warn.style.display = 'block';
+    } else {
+      warn.style.display = 'none';
+      warn.innerHTML = '';
+    }
+  }
+  return conflictPairs.length === 0;
+}
+
 async function veInsertImages() {
   if(!toolSid) return toast('请先上传视频', 'warn');
   if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
-  const pos = parseFloat(document.getElementById('ve-img-pos').value) || 0;
   const files = document.getElementById('ve-img-files').files;
   if(!files.length) return toast('请选择图片', 'warn');
-  const subsText = document.getElementById('ve-img-subs').value;
-  const subs = subsText.split('\n').map(l=>l.trim()).filter(Boolean);
-  if(subs.length !== files.length) return toast(`图片数量(${files.length})和字幕行数(${subs.length})不匹配`, 'warn');
+
+  // Per-image position/duration/subtitle from the rendered rows
+  const posEls = document.querySelectorAll('#ve-img-rows .ve-img-pos');
+  const durEls = document.querySelectorAll('#ve-img-rows .ve-img-dur');
+  const subEls = document.querySelectorAll('#ve-img-rows .ve-img-sub');
+  if(posEls.length !== files.length) return toast('请重新选择图片', 'warn');
+  if(!validateImageRows()) return toast('存在时间冲突的图片，请调整位置/时长', 'error');
+  const positions = Array.from(posEls).map(el => Math.max(0, parseFloat(el.value) || 0));
+  const durations = Array.from(durEls).map(el => Math.max(0.5, parseFloat(el.value) || 3));
+  const subs = Array.from(subEls).map(el => el.value || '');
 
   lockTask(toolSid, 've_insert');
+  releaseToolVideo('veditor');
   updateTaskBar('生成图片视频并插入中...', 10);
   document.getElementById('ve-status').textContent = '处理中，可能需要几分钟...';
 
   try {
     const fd = new FormData();
-    fd.append('position', pos);
+    fd.append('positions', JSON.stringify(positions));
+    fd.append('durations', JSON.stringify(durations));
     fd.append('subtitles', JSON.stringify(subs));
-    Array.from(files).forEach((f,i) => fd.append(`image_${i}`, f));
+    Array.from(files).forEach(f => fd.append('images', f));
     const r = await fetch(API+'/api/tool/'+toolSid+'/edit/insert-images', {method:'POST', body:fd});
     const data = await r.json();
     if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
@@ -2995,8 +3728,8 @@ async function veInsertImages() {
       if(st.stage==='done') {
         clearInterval(pollId);
         document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 插入完成！</span>';
-        document.getElementById('ve-download-btn').classList.remove('hidden');
-        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        showToolResult('veditor');
+        clearOpInputs('insert-images');
         updateTaskBar('完成', 100);
         setTimeout(()=>unlockTask(), 1500);
       } else if(st.stage==='error') {
@@ -3034,6 +3767,7 @@ async function veSpeedUp() {
   if(end <= start) return toast('结束时间需大于起始时间', 'warn');
   if(rate <= 1) return toast('倍速需大于1', 'warn');
   lockTask(toolSid, 've_speedup');
+  releaseToolVideo('veditor');
   updateTaskBar('视频变速处理中...', 30);
   document.getElementById('ve-status').textContent = '处理中...';
   try {
@@ -3049,8 +3783,7 @@ async function veSpeedUp() {
         clearInterval(pollSpeed);
         document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 变速完成！请录制新音频</span>';
         document.getElementById('ve-speed-record').classList.remove('hidden');
-        document.getElementById('ve-download-btn').classList.remove('hidden');
-        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        showToolResult('veditor');
         updateTaskBar('完成', 100);
         setTimeout(()=>unlockTask(), 1500);
       } else if(st.stage==='error') {
@@ -3094,6 +3827,7 @@ async function veSpeedMerge() {
   if(!toolSid) return toast('请先上传视频', 'warn');
   if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
   lockTask(toolSid, 've_merge');
+  releaseToolVideo('veditor');
   updateTaskBar('合成视频中...', 50);
   document.getElementById('ve-status').textContent = '合成中...';
   try {
@@ -3108,9 +3842,9 @@ async function veSpeedMerge() {
         clearInterval(pollMerge);
         document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 合成完成！视频已更新</span>';
         document.getElementById('ve-speed-record').classList.add('hidden');
-        document.getElementById('ve-download-btn').classList.remove('hidden');
         speedRecBlob = null;
-        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        showToolResult('veditor');
+        clearOpInputs('speedup-merge');
         updateTaskBar('完成', 100);
         setTimeout(()=>unlockTask(), 1500);
       } else if(st.stage==='error') {
@@ -3164,6 +3898,50 @@ function onReplaceAudioFile(input) {
   document.getElementById('ve-rep-rec-status').textContent = '已选择: ' + file.name;
 }
 
+function onConcatFilesChange() {
+  const files = document.getElementById('ve-cat-files').files;
+  const listEl = document.getElementById('ve-cat-list');
+  if(!listEl) return;
+  if(!files.length) { listEl.innerHTML = ''; return; }
+  const lines = Array.from(files).map((f,i) =>
+    `<div style="padding:4px 0">${i+1}. ${escHtml(f.name)} <span style="color:#999">(${(f.size/1024/1024).toFixed(1)} MB)</span></div>`
+  );
+  listEl.innerHTML = `<div style="color:#666;margin-bottom:4px">已选 ${files.length} 个片段：</div>` + lines.join('');
+}
+
+async function veConcat() {
+  if(!toolSid) return toast('请先上传视频', 'warn');
+  if(isTaskBusy()) return toast('请等待另一个任务处理完成后再执行', 'warn');
+  const files = document.getElementById('ve-cat-files').files;
+  if(!files.length) return toast('请选择要拼接的视频', 'warn');
+  lockTask(toolSid, 've_concat');
+  releaseToolVideo('veditor');
+  updateTaskBar('视频拼接中...', 20);
+  document.getElementById('ve-status').textContent = '拼接中，可能需要几分钟...';
+  try {
+    const fd = new FormData();
+    for(const f of files) fd.append('segments', f);
+    const r = await fetch(API+'/api/tool/'+toolSid+'/edit/concat', {method:'POST', body:fd});
+    const data = await r.json();
+    if(data.error) { toast('失败: '+data.error, 'error'); unlockTask(); return; }
+    const pollId = setInterval(async()=>{
+      const st = await(await fetch(API+'/api/tool/'+toolSid+'/state')).json();
+      if(st.stage==='done') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 拼接完成！</span>';
+        showToolResult('veditor');
+        clearOpInputs('concat');
+        updateTaskBar('完成', 100);
+        setTimeout(()=>unlockTask(), 1500);
+      } else if(st.stage==='error') {
+        clearInterval(pollId);
+        document.getElementById('ve-status').innerHTML = '<span style="color:#d9534f">'+escHtml(st.msg||'拼接失败')+'</span>';
+        unlockTask();
+      }
+    }, 2000);
+  } catch(e) { toast('失败: '+e, 'error'); unlockTask(); }
+}
+
 async function veReplaceAudio() {
   if(!toolSid) return toast('请先上传视频', 'warn');
   if(!replaceRecBlob) return toast('请先录制或上传音频', 'warn');
@@ -3174,6 +3952,7 @@ async function veReplaceAudio() {
   if(end <= start) return toast('结束时间需大于起始时间', 'warn');
 
   lockTask(toolSid, 've_replace_audio');
+  releaseToolVideo('veditor');
   updateTaskBar('替换音频中...', 30);
   document.getElementById('ve-status').textContent = '处理中...';
   try {
@@ -3189,8 +3968,8 @@ async function veReplaceAudio() {
       if(st.stage==='done') {
         clearInterval(pollId);
         document.getElementById('ve-status').innerHTML = '<span style="color:#2a9d3f">✓ 音频替换完成！</span>';
-        document.getElementById('ve-download-btn').classList.remove('hidden');
-        document.getElementById('ve-video').src = API + '/api/tool/' + toolSid + '/video?t='+Date.now();
+        showToolResult('veditor');
+        clearOpInputs('replace-audio');
         updateTaskBar('完成', 100);
         setTimeout(()=>unlockTask(), 1500);
       } else if(st.stage==='error') {
@@ -3211,8 +3990,8 @@ function showImageZoom(url) {
   if(!modal) {
     modal = document.createElement('div');
     modal.id = 'img-zoom-modal';
-    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;display:flex;align-items:center;justify-content:center;cursor:zoom-out';
-    modal.innerHTML = '<img id="img-zoom-img" style="max-width:90%;max-height:90%;object-fit:contain;border-radius:4px" onclick="event.stopPropagation()">';
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;display:none;align-items:center;justify-content:center;cursor:zoom-out';
+    modal.innerHTML = '<img id="img-zoom-img" style="max-width:90%;max-height:90%;object-fit:contain;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,0.5)" onclick="event.stopPropagation()">';
     modal.onclick = () => modal.style.display = 'none';
     document.body.appendChild(modal);
   }
@@ -3220,10 +3999,5 @@ function showImageZoom(url) {
   modal.style.display = 'flex';
 }
 </script>
-
-<!-- Image zoom modal -->
-<div id="img-zoom-modal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;display:none;align-items:center;justify-content:center;cursor:zoom-out" onclick="this.style.display='none'">
-  <img id="img-zoom-img" style="max-width:90%;max-height:90%;object-fit:contain;border-radius:4px" onclick="event.stopPropagation()">
-</div>
 </body>
 </html>

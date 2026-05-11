@@ -118,7 +118,7 @@ def call_llm(prompt, system=None, config=None, max_tokens=None):
         return _call_openai(base_url, api_key, model, prompt, system)
 
 
-def call_llm_vision(prompt, images_b64, system=None, config=None):
+def call_llm_vision(prompt, images_b64, system=None, config=None, timeout=None):
     """Call multimodal LLM with images."""
     if config is None:
         config = get_active_config()
@@ -134,10 +134,34 @@ def call_llm_vision(prompt, images_b64, system=None, config=None):
         raise ValueError(f"「{config.get('name','未命名')}」API Key 未配置")
 
     if provider == "anthropic":
-        return _call_anthropic_vision(base_url, api_key, model, prompt, images_b64, system)
+        return _call_anthropic_vision(base_url, api_key, model, prompt, images_b64, system, timeout)
     else:
-        return _call_openai_vision(base_url, api_key, model, prompt, images_b64, system)
+        return _call_openai_vision(base_url, api_key, model, prompt, images_b64, system, timeout)
 
+
+def _retry_post(url, headers, body, timeout=120, max_retries=4):
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            resp = httpx.post(url, headers=headers, json=body, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (500, 502, 503, 504, 429):
+                last_err = e
+                try:
+                    body_text = e.response.text[:200]
+                except Exception:
+                    body_text = ""
+                print(f"[llm] retry {attempt+1}/{max_retries} {e.response.status_code}: {body_text}")
+                import time; time.sleep(2 ** attempt)
+                continue
+            try:
+                err_body = e.response.text[:500]
+            except Exception:
+                err_body = ""
+            raise RuntimeError(f"LLM API {e.response.status_code}: {err_body}") from e
+    raise RuntimeError(f"LLM API failed after {max_retries} retries, last: {last_err.response.status_code}")
 
 def _call_openai(base_url, api_key, model, prompt, system):
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -146,13 +170,9 @@ def _call_openai(base_url, api_key, model, prompt, system):
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    resp = httpx.post(
-        url,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": messages, "temperature": 0.3},
-        timeout=120,
-    )
-    resp.raise_for_status()
+    resp = _retry_post(url,
+                       headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                       body={"model": model, "messages": messages, "temperature": 0.3})
     data = resp.json()
     return data["choices"][0]["message"]["content"]
 
@@ -181,7 +201,11 @@ def _anthropic_headers(base_url, api_key):
 
 
 def _call_anthropic(base_url, api_key, model, prompt, system, max_tokens=None):
-    url = f"{base_url.rstrip('/')}/messages"
+    base = base_url.rstrip('/')
+    # Kimi base_url often omits /v1 (e.g. https://api.kimi.com/coding/)
+    if _is_kimi(base_url) and not base.endswith('/v1'):
+        base = base + '/v1'
+    url = f"{base}/messages"
     # Kimi requires content as array format
     if _is_kimi(base_url):
         messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
@@ -191,13 +215,10 @@ def _call_anthropic(base_url, api_key, model, prompt, system, max_tokens=None):
     if system:
         body["system"] = system
 
-    resp = httpx.post(
-        url,
-        headers=_anthropic_headers(base_url, api_key),
-        json=body,
-        timeout=300,
-    )
-    resp.raise_for_status()
+    resp = _retry_post(url,
+                       headers=_anthropic_headers(base_url, api_key),
+                       body=body,
+                       timeout=300)
     data = resp.json()
     return data["content"][0]["text"]
 
@@ -211,7 +232,7 @@ def _detect_media_type(b64):
     return "image/jpeg"
 
 
-def _call_openai_vision(base_url, api_key, model, prompt, images_b64, system):
+def _call_openai_vision(base_url, api_key, model, prompt, images_b64, system, timeout=None):
     url = f"{base_url.rstrip('/')}/chat/completions"
     content = []
     for img in images_b64:
@@ -224,19 +245,19 @@ def _call_openai_vision(base_url, api_key, model, prompt, images_b64, system):
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": content})
 
-    resp = httpx.post(
-        url,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": messages, "temperature": 0.3},
-        timeout=180,
-    )
-    resp.raise_for_status()
+    resp = _retry_post(url,
+                       headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                       body={"model": model, "messages": messages, "temperature": 0.3},
+                       timeout=timeout or 180)
     data = resp.json()
     return data["choices"][0]["message"]["content"]
 
 
-def _call_anthropic_vision(base_url, api_key, model, prompt, images_b64, system):
-    url = f"{base_url.rstrip('/')}/messages"
+def _call_anthropic_vision(base_url, api_key, model, prompt, images_b64, system, timeout=None):
+    base = base_url.rstrip('/')
+    if _is_kimi(base_url) and not base.endswith('/v1'):
+        base = base + '/v1'
+    url = f"{base}/messages"
     content = []
     for img in images_b64:
         mt = _detect_media_type(img)
@@ -247,12 +268,35 @@ def _call_anthropic_vision(base_url, api_key, model, prompt, images_b64, system)
     if system:
         body["system"] = system
 
-    resp = httpx.post(
-        url,
-        headers=_anthropic_headers(base_url, api_key),
-        json=body,
-        timeout=180,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["content"][0]["text"]
+    _timeout = timeout or 300
+    # Retry on transient errors (including 500 from overloaded upstream)
+    last_err = None
+    for attempt in range(4):
+        try:
+            resp = httpx.post(
+                url,
+                headers=_anthropic_headers(base_url, api_key),
+                json=body,
+                timeout=_timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["content"][0]["text"]
+        except httpx.HTTPStatusError as e:
+            # 500 from LLM upstream is often transient overload
+            if e.response.status_code in (500, 502, 503, 504, 429):
+                last_err = e
+                try:
+                    body_text = e.response.text[:300]
+                except Exception:
+                    body_text = ""
+                print(f"[llm] attempt {attempt+1} failed with {e.response.status_code}: {body_text}")
+                import time; time.sleep(2 ** attempt)
+                continue
+            # Surface the actual error body for debugging
+            try:
+                err_body = e.response.text[:500]
+            except Exception:
+                err_body = ""
+            raise RuntimeError(f"LLM API {e.response.status_code}: {err_body}") from e
+    raise RuntimeError(f"LLM API failed after 4 retries, last status: {last_err.response.status_code}")
