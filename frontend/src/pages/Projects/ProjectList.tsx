@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useProjects, useCreateProject, useDeleteProject } from '../../api/projects'
 
 export default function ProjectList() {
@@ -71,7 +72,9 @@ export default function ProjectList() {
         {projects?.map((p) => (
           <div key={p.name} className="bg-white p-4 rounded border">
             <div className="flex justify-between items-start mb-2">
-              <h3 className="font-semibold text-gray-900">{p.name}</h3>
+              <Link to={`/projects/${p.name}`} className="font-semibold text-gray-900 hover:text-blue-600">
+                {p.name}
+              </Link>
               <button
                 onClick={() => {
                   if (confirm(`确定删除项目 ${p.name} ?`)) deleteMut.mutate(p.name)

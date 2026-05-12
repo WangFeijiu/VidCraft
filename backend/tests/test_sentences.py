@@ -8,7 +8,7 @@ def _create_project(client, name: str, sample_bytes: bytes):
     client.post("/api/projects", files=files, data={"name": name})
 
 
-def test_save_and_get_sentences(client, sample_video_bytes, mock_settings):
+def test_save_and_get_sentences(client, sample_video_bytes):
     _create_project(client, "sent_test", sample_video_bytes)
 
     sentences = [
