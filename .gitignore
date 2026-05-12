@@ -58,6 +58,11 @@ backend/data/
 backend/.env
 backend/.pytest_cache/
 
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
 # BMad tooling (installer-managed, not part of project code)
 _bmad/
 .claude/skills/

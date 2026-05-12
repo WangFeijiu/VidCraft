@@ -146,7 +146,13 @@ async def reorder_i2v_images(name: str, data: dict):
 async def analyze_i2v(name: str, data: Img2VidAnalyzeRequest):
     settings = _settings()
     i2v_save(name, settings, stage="analyzing", msg="分析图片中...")
-    return {"ok": True, "msg": "图片分析任务已启动（完整实现待迁移）"}
+    from app.services.img2vid import pipeline_i2v_analyze
+    from app.dependencies import get_executor
+    state = i2v_state(name, settings)
+    theme = state.get("theme", "")
+    executor = get_executor()
+    executor.submit(pipeline_i2v_analyze, name, theme, data.style, settings)
+    return {"ok": True}
 
 
 @router.get("/{name}/narration")
@@ -179,6 +185,10 @@ async def upload_i2v_voice_sample(name: str, sample: UploadFile = File(...)):
 async def preview_i2v_audio(name: str):
     settings = _settings()
     i2v_save(name, settings, stage="preview", msg="生成预览音频中...")
+    from app.services.img2vid import pipeline_i2v_preview_audio
+    from app.dependencies import get_executor
+    executor = get_executor()
+    executor.submit(pipeline_i2v_preview_audio, name, settings)
     return {"ok": True}
 
 
