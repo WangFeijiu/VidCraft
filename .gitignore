@@ -47,3 +47,20 @@ recordings/
 CosyVoice/pretrained_models/
 voice_studio/projects/
 voice_studio/__pycache__/
+voice_studio/custom_voices/
+voice_studio/img2vid/
+voice_studio/tool_workspace/
+voice_studio/voice_cache/
+voice_studio/llm_config.json
+
+# Backend runtime data
+backend/data/
+backend/.env
+backend/.pytest_cache/
+
+# BMad tooling (installer-managed, not part of project code)
+_bmad/
+.claude/skills/
+
+# Miscellaneous
+test_syntax.js

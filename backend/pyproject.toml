@@ -1,0 +1,16 @@
+[project]
+name = "voice-studio-backend"
+version = "0.1.0"
+description = "Voice Studio — AI video dubbing platform backend"
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

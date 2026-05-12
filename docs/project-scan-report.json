@@ -1,0 +1,38 @@
+{
+  "workflow_version": "1.2.0",
+  "timestamps": {"started": "2026-05-12T00:00:00Z", "last_updated": "2026-05-12T00:15:00Z", "completed": "2026-05-12T00:15:00Z"},
+  "mode": "initial_scan",
+  "scan_level": "exhaustive",
+  "project_root": "E:/视频处理",
+  "project_knowledge": "E:/视频处理/docs",
+  "project_types": [{"part_id": "voice_studio", "project_type_id": "web", "display_name": "Web Application (Flask + SPA)"}],
+  "completed_steps": [
+    {"step": "step_1", "status": "completed", "timestamp": "2026-05-12T00:01:00Z", "summary": "Classified as monolith with 1 part (web type)"},
+    {"step": "step_2", "status": "completed", "timestamp": "2026-05-12T00:02:00Z", "summary": "No existing docs found"},
+    {"step": "step_3", "status": "completed", "timestamp": "2026-05-12T00:03:00Z", "summary": "Tech stack: Flask + CosyVoice + Whisper + FFmpeg"},
+    {"step": "step_4", "status": "completed", "timestamp": "2026-05-12T00:05:00Z", "summary": "API scan: 60+ endpoints, state management via file-based JSON"},
+    {"step": "step_5", "status": "completed", "timestamp": "2026-05-12T00:06:00Z", "summary": "Source tree documented"},
+    {"step": "step_6", "status": "completed", "timestamp": "2026-05-12T00:07:00Z", "summary": "Dev guide written"},
+    {"step": "step_8", "status": "completed", "timestamp": "2026-05-12T00:09:00Z", "summary": "Architecture doc written"},
+    {"step": "step_9", "status": "completed", "timestamp": "2026-05-12T00:11:00Z", "summary": "All supporting docs written"},
+    {"step": "step_10", "status": "completed", "timestamp": "2026-05-12T00:12:00Z", "summary": "Master index generated"},
+    {"step": "step_12", "status": "completed", "timestamp": "2026-05-12T00:15:00Z", "summary": "Workflow complete"}
+  ],
+  "current_step": "completed",
+  "findings": {
+    "project_classification": "Monolith web app - Flask + SPA frontend",
+    "technology_stack": "Python/Flask/SocketIO + CosyVoice + faster-whisper + FFmpeg",
+    "api_count": "60+ REST endpoints + 4 WebSocket events",
+    "architecture": "Single-process monolith with thread-based concurrency"
+  },
+  "outputs_generated": [
+    "project-scan-report.json",
+    "project-overview.md",
+    "architecture.md",
+    "source-tree-analysis.md",
+    "development-guide.md",
+    "api-contracts.md",
+    "index.md"
+  ],
+  "resume_instructions": "Workflow complete"
+}
