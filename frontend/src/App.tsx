@@ -1,6 +1,7 @@
 import { Routes, Route, Link, Navigate } from 'react-router-dom'
 import ProjectList from './pages/Projects/ProjectList'
 import Img2VidList from './pages/Img2Vid/Img2VidList'
+import Img2VidDetail from './pages/Img2Vid/Img2VidDetail'
 import ToolList from './pages/Tools/ToolList'
 import LlmConfig from './pages/Settings/LlmConfig'
 
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/projects" replace />} />
           <Route path="/projects" element={<ProjectList />} />
           <Route path="/img2vid" element={<Img2VidList />} />
+          <Route path="/img2vid/:name" element={<Img2VidDetail />} />
           <Route path="/tools" element={<ToolList />} />
           <Route path="/settings" element={<LlmConfig />} />
         </Routes>
