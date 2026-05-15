@@ -1103,7 +1103,6 @@ def _pipeline_match(name, user_text):
         # Fix overlaps: for each overlapping group, split the union range equally
         i = 0
         while i < len(raw):
-            group_start = i
             group_end_ts = raw[i]["end"]
             j = i + 1
             while j < len(raw) and raw[j]["start"] < group_end_ts:
@@ -1118,6 +1117,21 @@ def _pipeline_match(name, user_text):
                     raw[idx]["start"] = round(span_start + k * dur_each, 2)
                     raw[idx]["end"] = round(span_start + (k + 1) * dur_each, 2)
             i = j
+
+        # Final: linearly scale to exactly cover [first_start, video_end]
+        # so total coverage always equals the original video duration.
+        first_start = raw[0]["start"]
+        current_end = raw[-1]["end"]
+        if current_end > first_start and abs(current_end - video_end) > 0.5:
+            scale = (video_end - first_start) / (current_end - first_start)
+            cursor = first_start
+            for i in range(len(raw)):
+                orig_dur = raw[i]["end"] - raw[i]["start"]
+                new_dur = orig_dur * scale
+                raw[i]["start"] = round(cursor, 2)
+                raw[i]["end"] = round(cursor + new_dur, 2)
+                cursor = raw[i]["end"]
+            raw[-1]["end"] = round(video_end, 2)
 
         final = raw
 
