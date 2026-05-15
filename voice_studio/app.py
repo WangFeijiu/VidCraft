@@ -1777,12 +1777,19 @@ def _get_video_info(path):
     """Return (width, height, duration) of a video file."""
     probe = subprocess.run([FFMPEG, "-i", str(path)],
                            capture_output=True, encoding='utf-8', errors='ignore')
-    # Resolution always follows ", " and precedes " [" in ffmpeg output
-    m = re.search(r",\s*(\d+)x(\d+)\s", probe.stderr or "")
+    stderr = probe.stderr or ""
+    m = re.search(r",\s*(\d+)x(\d+)\s", stderr)
     w, h = (int(m.group(1)), int(m.group(2))) if m else (1920, 1080)
-    m2 = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", probe.stderr or "")
+    m2 = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", stderr)
     dur = int(m2.group(1))*3600 + int(m2.group(2))*60 + float(m2.group(3)) if m2 else 600
     return w, h, dur
+
+def _get_video_fps(path):
+    """Return the frame rate (tbr) of a video file."""
+    probe = subprocess.run([FFMPEG, "-i", str(path)],
+                           capture_output=True, encoding='utf-8', errors='ignore')
+    m = re.search(r"(\d+(?:\.\d+)?)\s*tbr", probe.stderr or "")
+    return float(m.group(1)) if m else 25
 
 def _has_audio(path):
     """Return True if the file has at least one audio stream."""
@@ -1811,7 +1818,7 @@ def _enc_for_concat(src_path, dst_path, w, h, *, ss=None, t=None, fps=25, sr=441
     if not has_a:
         cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
     cmd += [str(dst_path)]
-    subprocess.run(cmd, check=True, capture_output=True, encoding='utf-8', errors='ignore')
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def _reencode_to(path_in, path_out, width, height, extra_args=None):
     """Re-encode video to exactly width x height (scale + pad with black bars)."""
@@ -3366,29 +3373,57 @@ def _pipeline_tool_ve_insert(sid, pos, mode):
         _tool_save_state(sid, stage="error", msg=f"插入失败: {e}\n{traceback.format_exc()}")
 
 def _pipeline_tool_ve_concat(sid, segment_paths):
-    """Append one or more video segments to the current source. All segments are
-    re-encoded to match the main video's resolution, fps, and audio sample rate
-    so the final concat works regardless of input format."""
+    """Append one or more video segments to the current source. Only the new
+    segments are re-encoded to match the main video's params; the main video
+    is used as-is to avoid a costly full re-encode."""
     d = _tool_session(sid)
     try:
         inp = _tool_source_video(sid)
         ow, oh, _ = _get_video_info(str(inp))
+        fps = _get_video_fps(str(inp))
 
         norm_dir = d / "_concat_norm"
         if norm_dir.exists():
             shutil.rmtree(str(norm_dir), ignore_errors=True)
         norm_dir.mkdir(parents=True, exist_ok=True)
 
-        main_norm = norm_dir / "main.mp4"
-        _enc_for_concat(inp, main_norm, ow, oh)
-        normalized = [main_norm]
+        # Re-encode only the new segments to match main video params
+        normalized = [str(inp)]
+        total = len(segment_paths)
         for i, src in enumerate(segment_paths):
+            _tool_save_state(sid, stage="processing", msg=f"编码片段 {i+1}/{total}...")
             out_p = norm_dir / f"seg_{i:03d}.mp4"
-            _enc_for_concat(src, out_p, ow, oh)
-            normalized.append(out_p)
+            _enc_for_concat(src, out_p, ow, oh, fps=fps)
+            normalized.append(str(out_p))
 
+        _tool_save_state(sid, stage="processing", msg="拼接视频...")
         out = d / "_concat_out.mp4"
-        _ffmpeg_concat([str(p) for p in normalized], str(out))
+        try:
+            _ffmpeg_concat(normalized, str(out))
+        except subprocess.CalledProcessError:
+            # -c copy failed (codec mismatch), fall back to re-encode concat
+            _tool_save_state(sid, stage="processing", msg="拼接视频（重新编码）...")
+            tmpdir = tempfile.mkdtemp(prefix="vs_cat_")
+            try:
+                lines = []
+                for i, seg in enumerate(normalized):
+                    tmp_seg = os.path.join(tmpdir, f"s{i:04d}.mp4")
+                    shutil.copy2(str(seg), tmp_seg)
+                    lines.append(f"file 's{i:04d}.mp4'")
+                concat_file = os.path.join(tmpdir, "concat.txt")
+                with open(concat_file, "w", encoding="utf-8") as f:
+                    f.write("\n".join(lines))
+                tmp_out = os.path.join(tmpdir, "out.mp4")
+                subprocess.run([FFMPEG, "-y", "-f", "concat", "-safe", "0",
+                                "-i", concat_file,
+                                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                                "-pix_fmt", "yuv420p",
+                                "-c:a", "aac", "-b:a", "192k",
+                                tmp_out],
+                               check=True, capture_output=True, encoding='utf-8', errors='ignore')
+                shutil.copy2(tmp_out, str(out))
+            finally:
+                shutil.rmtree(tmpdir, ignore_errors=True)
 
         _tool_replace_input(sid, out)
 
@@ -3398,8 +3433,13 @@ def _pipeline_tool_ve_concat(sid, segment_paths):
 
         _tool_save_state(sid, stage="done", msg="拼接完成", result_file="result.mp4")
     except subprocess.CalledProcessError as e:
-        err = (e.stderr or b"").decode("utf-8", "ignore")[-500:] if isinstance(e.stderr, bytes) else (e.stderr or "")[-500:]
-        _tool_save_state(sid, stage="error", msg=f"拼接失败: ffmpeg 错误\n{err}")
+        raw = e.stderr if isinstance(e.stderr, bytes) else (e.stderr or "").encode()
+        err = raw.decode("utf-8", "ignore")
+        # Show last 500 chars but also include the first error lines
+        lines = err.splitlines()
+        error_lines = [l for l in lines if "error" in l.lower() or "Error" in l]
+        summary = "\n".join(error_lines[-5:]) if error_lines else err[-500:]
+        _tool_save_state(sid, stage="error", msg=f"拼接失败: ffmpeg 错误\n{summary}")
     except Exception as e:
         _tool_save_state(sid, stage="error", msg=f"拼接失败: {e}\n{traceback.format_exc()}")
 
