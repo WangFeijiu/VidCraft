@@ -1137,12 +1137,8 @@ def _pipeline_match(name, user_text):
 
 # ── Routes: voice clone ─────────────────────────────────────────────
 def _clear_stale_clones(name):
-    """Remove all previous clone outputs and clone-accepted copies before a new
-    clone job, so the new run does not inherit stale audio (resume logic in
-    _pipeline_voice_clone skips sentences whose clone webm already exists) or
-    stale "auto-confirmed" selections from a prior run on the same project.
-    Manual recordings (selected_sources[idx] == 'manual') are preserved.
-    Note: does NOT clear the _cancel_clone flag — caller decides that."""
+    """Remove all previous clone outputs before a new clone job, so the new run
+    does not inherit stale audio. Manual recordings are never touched."""
     rec_dir = pd(name) / "recordings"
     if not rec_dir.exists():
         return
@@ -1150,15 +1146,10 @@ def _clear_stale_clones(name):
         f.unlink(missing_ok=True)
     for f in rec_dir.glob("s_*_clone.wav"):
         f.unlink(missing_ok=True)
+    # Reset selected_sources: keep manual entries, drop clone entries
     state = load_state(name)
     selected = state.get("selected_sources", {}) or {}
-    kept = {}
-    for k, v in selected.items():
-        if v == "manual":
-            kept[k] = v
-        else:
-            # 'clone' entries: also delete the accepted-clone copy
-            (rec_dir / f"s_{int(k):03d}.webm").unlink(missing_ok=True)
+    kept = {k: v for k, v in selected.items() if v == "manual"}
     save_state(name, selected_sources=kept)
 
 @app.route("/api/project/<name>/voice-clone", methods=["POST"])
