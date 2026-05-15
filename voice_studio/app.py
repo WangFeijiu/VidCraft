@@ -1116,10 +1116,6 @@ def _pipeline_match(name, user_text):
                 raw[idx]["start"] = round(prev_end + k * seg_dur, 2)
                 raw[idx]["end"] = round(prev_end + (k + 1) * seg_dur, 2)
 
-        # Safety: if last sentence doesn't reach video_end, extend it
-        if raw[-1]["end"] < video_end:
-            raw[-1]["end"] = round(video_end, 2)
-
         final = raw
 
         (pd(name) / "sentences_uploaded.json").write_text(json.dumps(final, ensure_ascii=False, indent=2), "utf-8")
