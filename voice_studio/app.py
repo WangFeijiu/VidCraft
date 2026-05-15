@@ -1029,92 +1029,47 @@ def _pipeline_match(name, user_text):
             'progress': 100
         }, namespace='/')
 
-        # Build raw result from LLM matches
-        raw = []
+        # Build final timeline: uploaded text over the ORIGINAL video timeline.
+        # The video duration NEVER changes — we just redistribute the original
+        # [0, video_end] span across the N uploaded sentences proportionally.
+        video_end = sentences[-1]["end"] if sentences else 0
+
+        # Use matched ranges to compute a weight (duration hint) per sentence,
+        # then normalize so the total exactly equals video_end.
+        weights = []
         for i in range(total_user):
             if i in result_map:
                 r = result_map[i]
-                raw.append({
-                    "text": user_text[i],
-                    "start": r["start"],
-                    "end": r["end"],
-                    "matched": True,
-                    "source": list(range(r["orig_start"]+1, r["orig_end"]+2))
-                })
+                dur = r["end"] - r["start"]
+                weights.append(max(dur, 0.1))
             else:
-                raw.append({
-                    "text": user_text[i],
-                    "start": None,
-                    "end": None,
-                    "matched": False,
-                    "source": []
-                })
+                # Unmatched: estimate from neighbouring matches
+                weights.append(1.0)
 
-        # Step 1: Redistribute overlapping matched segments proportionally
-        # Find groups of consecutive overlapping sentences and split the
-        # combined time range equally among them.
-        i = 0
-        while i < len(raw):
-            if not raw[i]["matched"]:
-                i += 1
-                continue
-            group_start = i
-            group_end_ts = raw[i]["end"]
-            # Extend group while next sentence overlaps with current group end
-            j = i + 1
-            while j < len(raw) and raw[j]["matched"] and raw[j]["start"] < group_end_ts:
-                group_end_ts = max(group_end_ts, raw[j]["end"])
-                j += 1
-            group = list(range(group_start, j))
-            if len(group) > 1:
-                span_start = raw[group[0]]["start"]
-                span_end = group_end_ts
-                dur_each = (span_end - span_start) / len(group)
-                for k, idx in enumerate(group):
-                    raw[idx]["start"] = round(span_start + k * dur_each, 2)
-                    raw[idx]["end"] = round(span_start + (k + 1) * dur_each, 2)
-            i = j
+        total_weight = sum(weights)
+        if total_weight <= 0:
+            total_weight = total_user
 
-        # Step 2: Assign fallback timestamps for unmatched sentences
-        video_end = sentences[-1]["end"] if sentences else 0
-        i = 0
-        while i < len(raw):
-            if raw[i]["matched"]:
-                i += 1
-                continue
-            # Find the run of consecutive unmatched sentences
-            run_start = i
-            while i < len(raw) and not raw[i]["matched"]:
-                i += 1
-            run_end = i  # exclusive
-            run_len = run_end - run_start
-            # Determine available gap
-            prev_end = raw[run_start - 1]["end"] if run_start > 0 else 0.0
-            next_start = raw[run_end]["start"] if run_end < len(raw) else video_end
-            gap = max(next_start - prev_end, 0.5 * run_len)
-            seg_dur = max(gap / run_len, 0.5)
-            for k in range(run_len):
-                idx = run_start + k
-                raw[idx]["start"] = round(prev_end + k * seg_dur, 2)
-                raw[idx]["end"] = round(prev_end + (k + 1) * seg_dur, 2)
-
-        # Step 3: Final pass — enforce strict monotonic ordering
         final = []
-        for i in range(len(raw)):
-            st = raw[i]["start"]
-            en = raw[i]["end"]
-            if final:
-                prev_end = final[-1]["end"]
-                if st < prev_end:
-                    dur = en - st
-                    st = prev_end
-                    en = st + dur
+        cursor = 0.0
+        for i in range(total_user):
+            share = (weights[i] / total_weight) * video_end
+            st = round(cursor, 2)
+            en = round(cursor + share, 2)
+            # Clamp last sentence to exact video_end
+            if i == total_user - 1:
+                en = round(video_end, 2)
+            source = []
+            if i in result_map:
+                r = result_map[i]
+                source = list(range(r["orig_start"]+1, r["orig_end"]+2))
             final.append({
-                "text": raw[i]["text"],
-                "start": round(st, 2),
-                "end": round(en, 2),
-                "source": raw[i].get("source", [])
+                "text": user_text[i],
+                "start": st,
+                "end": en,
+                "source": source
             })
+            cursor = en
 
         (pd(name) / "sentences_uploaded.json").write_text(json.dumps(final, ensure_ascii=False, indent=2), "utf-8")
 
