@@ -1386,6 +1386,56 @@ def _pipeline_compose(name):
             save_state(name, stage="error", msg="没有可合成的内容（所有句子已被删除）")
             return
 
+        # Redistribute timeline proportional to recording durations.
+        # Each sentence gets time proportional to its actual recording length,
+        # keeping total duration equal to the original video.
+        rec_dir = d / "recordings"
+        weights = []
+        for i, seg in enumerate(sentences, 1):
+            if i in deleted:
+                weights.append(0)
+                continue
+            rec = rec_dir / f"s_{i:03d}.webm"
+            if not rec.exists():
+                rec = rec_dir / f"s_{i:03d}_clone.webm"
+            if not rec.exists():
+                rec = rec_dir / f"s_{i:03d}.wav"
+            if rec.exists():
+                probe = subprocess.run(
+                    [FFMPEG, "-i", str(rec)],
+                    capture_output=True)
+                m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", (probe.stderr or b"").decode("utf-8", errors="ignore"))
+                dur = int(m.group(1))*3600 + int(m.group(2))*60 + float(m.group(3)) if m else 0
+                weights.append(max(dur, 0.5))
+            else:
+                weights.append(0)  # no recording → fallback to original timing
+        total_w = sum(w for w in weights if w > 0)
+        if total_w > 0:
+            video_dur = state.get("duration", sentences[-1]["end"] if sentences else 0)
+            # Count non-deleted sentences that have recordings
+            has_rec_count = sum(1 for idx, (i, seg) in enumerate(active) if weights[i-1] > 0)
+            no_rec_total = sum(seg["end"] - seg["start"] for i, seg in active if weights[i-1] == 0)
+            # Recording sentences share the remaining time proportionally
+            rec_share = max(video_dur - no_rec_total, 0)
+            cursor = 0.0
+            for i, seg in enumerate(sentences, 1):
+                if i in deleted:
+                    continue
+                w = weights[i-1]
+                if w > 0:
+                    seg_dur = (w / total_w) * rec_share
+                    seg["start"] = round(cursor, 2)
+                    seg["end"] = round(cursor + seg_dur, 2)
+                    cursor = seg["end"]
+                else:
+                    orig_dur = seg["end"] - seg["start"]
+                    seg["start"] = round(cursor, 2)
+                    seg["end"] = round(cursor + orig_dur, 2)
+                    cursor = seg["end"]
+            # Clamp last sentence to exact video duration
+            last_active = active[-1]
+            sentences[last_active[0]-1]["end"] = round(video_dur, 2)
+
         save_state(name, stage="composing", msg="提取片段...")
         tmp_dir = d / "_compose_segments"
         tmp_dir.mkdir(exist_ok=True)
