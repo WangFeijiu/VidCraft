@@ -948,54 +948,28 @@ def _pipeline_match(name, user_text):
         WINDOW_SIZE = 10
         result_map = {}  # user_idx -> {start, end, orig_start, orig_end}
 
-        orig_cursor = 0
-        user_cursor = 0
-
-        while user_cursor < total_user:
-            # Take 10 user subtitles
-            user_end = min(user_cursor + WINDOW_SIZE, total_user)
-            user_window = user_text[user_cursor:user_end]
-
-            # Take 10-15 original subtitles (with buffer for splits/merges)
-            orig_end = min(orig_cursor + WINDOW_SIZE + 5, total_orig)
-            orig_window = sentences[orig_cursor:orig_end]
-
-            socketio.emit('match_progress', {
-                'project': name,
-                'msg': f'匹配中... {user_end}/{total_user} 句',
-                'progress': int((user_end / total_user) * 100)
-            }, namespace='/')
-
-            # Build prompt for LLM
-            orig_lines = "\n".join(
-                f"[{orig_cursor + i}] {s['text'][:50]}"
-                for i, s in enumerate(orig_window)
-            )
-            user_lines = "\n".join(
-                f"[{user_cursor + i}] {t[:50]}"
-                for i, t in enumerate(user_window)
-            )
-
-            prompt = (
-                f"原始字幕（序号{orig_cursor}-{orig_end-1}）：\n{orig_lines}\n\n"
-                f"上传字幕（序号{user_cursor}-{user_end-1}）：\n{user_lines}\n\n"
-                "请匹配每句上传字幕对应的原始字幕区间。\n"
-                "输出格式：`上传序号:原始起始-原始结束`（一行一个）\n"
-                "例如：\n"
-                "0:0-2  （上传第0句对应原始0-2句，合并）\n"
-                "1:3-3  （上传第1句对应原始第3句）\n"
-                "2:4-4  （上传第2句对应原始第4句，拆分1/2）\n"
-                "3:4-4  （上传第3句对应原始第4句，拆分2/2）\n\n"
-                "规则：\n"
-                "1. 序号使用全局序号（不是窗口内序号）\n"
-                "2. 如果原始某句被拆分，多个上传句可以引用同一原始句\n"
-                "3. 只输出匹配结果，不要解释"
-            )
-
-            resp = call_llm(prompt, system="你是字幕匹配专家，只输出匹配结果。", max_tokens=4000)
-
-            # Parse results
-            max_orig_matched = orig_cursor - 1
+        # Try one-shot matching first (all sentences in a single LLM call)
+        orig_lines = "\n".join(
+            f"[{i}] {s['text'][:80]}"
+            for i, s in enumerate(sentences)
+        )
+        user_lines = "\n".join(
+            f"[{i}] {t[:80]}"
+            for i, t in enumerate(user_text)
+        )
+        prompt = (
+            f"原始字幕（{total_orig}句，序号0-{total_orig-1}）：\n{orig_lines}\n\n"
+            f"上传字幕（{total_user}句，序号0-{total_user-1}）：\n{user_lines}\n\n"
+            "请匹配每句上传字幕对应的原始字幕区间。\n"
+            "输出格式：`上传序号:原始起始-原始结束`（一行一个）\n"
+            "规则：\n"
+            "1. 序号使用全局序号\n"
+            "2. 如果原始某句被拆分，多个上传句可以引用同一原始句\n"
+            "3. 原始字幕区间必须连续递增，不允许重叠或回退\n"
+            "4. 只输出匹配结果，不要解释"
+        )
+        try:
+            resp = call_llm(prompt, system="你是字幕匹配专家，只输出匹配结果。", max_tokens=8000, timeout=120)
             for line in resp.strip().split("\n"):
                 line = line.strip()
                 if not line or ":" not in line:
@@ -1006,7 +980,6 @@ def _pipeline_match(name, user_text):
                     orig_s, orig_e = range_str.strip().split("-", 1)
                     orig_start = int(orig_s.strip())
                     orig_end = int(orig_e.strip())
-
                     if 0 <= orig_start <= orig_end < total_orig and 0 <= user_idx < total_user:
                         result_map[user_idx] = {
                             "start": sentences[orig_start]["start"],
@@ -1014,14 +987,72 @@ def _pipeline_match(name, user_text):
                             "orig_start": orig_start,
                             "orig_end": orig_end,
                         }
-                        max_orig_matched = max(max_orig_matched, orig_end)
                 except Exception as e:
                     print(f"Parse error on line '{line}': {e}")
                     continue
+        except Exception as e:
+            print(f"One-shot matching failed, falling back to windowed: {e}")
+            result_map = {}
 
-            # Move cursors
-            orig_cursor = max_orig_matched + 1
-            user_cursor = user_end
+        # Fallback: windowed matching if one-shot didn't produce enough results
+        if len(result_map) < total_user * 0.5:
+            orig_cursor = 0
+            user_cursor = 0
+            while user_cursor < total_user:
+                user_end = min(user_cursor + WINDOW_SIZE, total_user)
+                user_window = user_text[user_cursor:user_end]
+                orig_end_win = min(orig_cursor + WINDOW_SIZE + 5, total_orig)
+                orig_window = sentences[orig_cursor:orig_end_win]
+
+                socketio.emit('match_progress', {
+                    'project': name,
+                    'msg': f'匹配中... {user_end}/{total_user} 句',
+                    'progress': int((user_end / total_user) * 100)
+                }, namespace='/')
+
+                orig_lines = "\n".join(
+                    f"[{orig_cursor + i}] {s['text'][:50]}"
+                    for i, s in enumerate(orig_window)
+                )
+                user_lines = "\n".join(
+                    f"[{user_cursor + i}] {t[:50]}"
+                    for i, t in enumerate(user_window)
+                )
+                prompt = (
+                    f"原始字幕（序号{orig_cursor}-{orig_end_win-1}）：\n{orig_lines}\n\n"
+                    f"上传字幕（序号{user_cursor}-{user_end-1}）：\n{user_lines}\n\n"
+                    "请匹配每句上传字幕对应的原始字幕区间。\n"
+                    "输出格式：`上传序号:原始起始-原始结束`（一行一个）\n"
+                    "规则：\n"
+                    "1. 序号使用全局序号\n"
+                    "2. 如果原始某句被拆分，多个上传句可以引用同一原始句\n"
+                    "3. 只输出匹配结果，不要解释"
+                )
+                resp = call_llm(prompt, system="你是字幕匹配专家，只输出匹配结果。", max_tokens=4000)
+                max_orig_matched = orig_cursor - 1
+                for line in resp.strip().split("\n"):
+                    line = line.strip()
+                    if not line or ":" not in line:
+                        continue
+                    try:
+                        user_idx_str, range_str = line.split(":", 1)
+                        user_idx = int(user_idx_str.strip())
+                        orig_s, orig_e = range_str.strip().split("-", 1)
+                        orig_start = int(orig_s.strip())
+                        orig_end_parsed = int(orig_e.strip())
+                        if 0 <= orig_start <= orig_end_parsed < total_orig and 0 <= user_idx < total_user:
+                            result_map[user_idx] = {
+                                "start": sentences[orig_start]["start"],
+                                "end": sentences[orig_end_parsed]["end"],
+                                "orig_start": orig_start,
+                                "orig_end": orig_end_parsed,
+                            }
+                            max_orig_matched = max(max_orig_matched, orig_end_parsed)
+                    except Exception as e:
+                        print(f"Parse error on line '{line}': {e}")
+                        continue
+                orig_cursor = max_orig_matched + 1
+                user_cursor = user_end
 
         socketio.emit('match_progress', {
             'project': name,
