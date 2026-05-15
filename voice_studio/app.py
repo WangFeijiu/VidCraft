@@ -1060,8 +1060,26 @@ def _pipeline_match(name, user_text):
             'progress': 100
         }, namespace='/')
 
-        # Build final result using original timestamps from matched sentences.
-        # Only fix local overlaps where LLM matching produced conflicting ranges.
+        # Validate matching results: enforce strictly increasing original ranges.
+        # If LLM returned overlapping/out-of-order ranges, clamp them.
+        last_orig_end = -1
+        validated = {}
+        for i in sorted(result_map.keys()):
+            r = result_map[i]
+            # Ensure orig_start is after the previous sentence's orig_end
+            if r["orig_start"] <= last_orig_end:
+                r["orig_start"] = last_orig_end + 1
+                r["start"] = sentences[r["orig_start"]]["start"]
+            if r["orig_end"] < r["orig_start"]:
+                r["orig_end"] = r["orig_start"]
+                r["end"] = sentences[r["orig_end"]]["end"]
+            last_orig_end = r["orig_end"]
+            validated[i] = r
+        result_map = validated
+
+        # Build final result using original timestamps directly.
+        # No scaling, no redistribution — just use the matched original times.
+        video_end = sentences[-1]["end"] if sentences else 0
         raw = []
         for i in range(total_user):
             if i in result_map:
@@ -1080,8 +1098,7 @@ def _pipeline_match(name, user_text):
                     "source": []
                 })
 
-        # Assign unmatched sentences: interpolate into gaps between neighbours
-        video_end = sentences[-1]["end"] if sentences else 0
+        # Fill unmatched: interpolate into gaps between matched neighbours
         i = 0
         while i < len(raw):
             if raw[i]["start"] is not None:
@@ -1090,47 +1107,17 @@ def _pipeline_match(name, user_text):
             run_start = i
             while i < len(raw) and raw[i]["start"] is None:
                 i += 1
-            run_end = i
-            run_len = run_end - run_start
+            run_len = i - run_start
             prev_end = raw[run_start - 1]["end"] if run_start > 0 else 0.0
-            next_start = raw[run_end]["start"] if run_end < len(raw) else video_end
+            next_start = raw[i]["start"] if i < len(raw) else video_end
             seg_dur = max((next_start - prev_end) / run_len, 0.5)
             for k in range(run_len):
                 idx = run_start + k
                 raw[idx]["start"] = round(prev_end + k * seg_dur, 2)
                 raw[idx]["end"] = round(prev_end + (k + 1) * seg_dur, 2)
 
-        # Fix overlaps: for each overlapping group, split the union range equally
-        i = 0
-        while i < len(raw):
-            group_end_ts = raw[i]["end"]
-            j = i + 1
-            while j < len(raw) and raw[j]["start"] < group_end_ts:
-                group_end_ts = max(group_end_ts, raw[j]["end"])
-                j += 1
-            if j - i > 1:
-                span_start = raw[i]["start"]
-                span_end = group_end_ts
-                dur_each = (span_end - span_start) / (j - i)
-                for k in range(j - i):
-                    idx = i + k
-                    raw[idx]["start"] = round(span_start + k * dur_each, 2)
-                    raw[idx]["end"] = round(span_start + (k + 1) * dur_each, 2)
-            i = j
-
-        # Final: linearly scale to exactly cover [first_start, video_end]
-        # so total coverage always equals the original video duration.
-        first_start = raw[0]["start"]
-        current_end = raw[-1]["end"]
-        if current_end > first_start and abs(current_end - video_end) > 0.5:
-            scale = (video_end - first_start) / (current_end - first_start)
-            cursor = first_start
-            for i in range(len(raw)):
-                orig_dur = raw[i]["end"] - raw[i]["start"]
-                new_dur = orig_dur * scale
-                raw[i]["start"] = round(cursor, 2)
-                raw[i]["end"] = round(cursor + new_dur, 2)
-                cursor = raw[i]["end"]
+        # Safety: if last sentence doesn't reach video_end, extend it
+        if raw[-1]["end"] < video_end:
             raw[-1]["end"] = round(video_end, 2)
 
         final = raw
