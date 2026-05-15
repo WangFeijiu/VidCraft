@@ -1029,33 +1029,66 @@ def _pipeline_match(name, user_text):
             'progress': 100
         }, namespace='/')
 
-        # Build final timeline: uploaded text over the ORIGINAL video timeline.
-        # The video duration NEVER changes — redistribute [0, video_end]
-        # proportionally by TEXT LENGTH (not by unreliable LLM time ranges).
-        video_end = sentences[-1]["end"] if sentences else 0
-
-        weights = [max(len(t.strip()), 2) for t in user_text]
-        total_weight = sum(weights)
-
-        final = []
-        cursor = 0.0
+        # Build final result using original timestamps from matched sentences.
+        # Only fix local overlaps where LLM matching produced conflicting ranges.
+        raw = []
         for i in range(total_user):
-            share = (weights[i] / total_weight) * video_end
-            st = round(cursor, 2)
-            en = round(cursor + share, 2)
-            if i == total_user - 1:
-                en = round(video_end, 2)
-            source = []
             if i in result_map:
                 r = result_map[i]
-                source = list(range(r["orig_start"]+1, r["orig_end"]+2))
-            final.append({
-                "text": user_text[i],
-                "start": st,
-                "end": en,
-                "source": source
-            })
-            cursor = en
+                raw.append({
+                    "text": user_text[i],
+                    "start": r["start"],
+                    "end": r["end"],
+                    "source": list(range(r["orig_start"]+1, r["orig_end"]+2))
+                })
+            else:
+                raw.append({
+                    "text": user_text[i],
+                    "start": None,
+                    "end": None,
+                    "source": []
+                })
+
+        # Assign unmatched sentences: interpolate into gaps between neighbours
+        video_end = sentences[-1]["end"] if sentences else 0
+        i = 0
+        while i < len(raw):
+            if raw[i]["start"] is not None:
+                i += 1
+                continue
+            run_start = i
+            while i < len(raw) and raw[i]["start"] is None:
+                i += 1
+            run_end = i
+            run_len = run_end - run_start
+            prev_end = raw[run_start - 1]["end"] if run_start > 0 else 0.0
+            next_start = raw[run_end]["start"] if run_end < len(raw) else video_end
+            seg_dur = max((next_start - prev_end) / run_len, 0.5)
+            for k in range(run_len):
+                idx = run_start + k
+                raw[idx]["start"] = round(prev_end + k * seg_dur, 2)
+                raw[idx]["end"] = round(prev_end + (k + 1) * seg_dur, 2)
+
+        # Fix overlaps: for each overlapping group, split the union range equally
+        i = 0
+        while i < len(raw):
+            group_start = i
+            group_end_ts = raw[i]["end"]
+            j = i + 1
+            while j < len(raw) and raw[j]["start"] < group_end_ts:
+                group_end_ts = max(group_end_ts, raw[j]["end"])
+                j += 1
+            if j - i > 1:
+                span_start = raw[i]["start"]
+                span_end = group_end_ts
+                dur_each = (span_end - span_start) / (j - i)
+                for k in range(j - i):
+                    idx = i + k
+                    raw[idx]["start"] = round(span_start + k * dur_each, 2)
+                    raw[idx]["end"] = round(span_start + (k + 1) * dur_each, 2)
+            i = j
+
+        final = raw
 
         (pd(name) / "sentences_uploaded.json").write_text(json.dumps(final, ensure_ascii=False, indent=2), "utf-8")
 
@@ -1385,56 +1418,6 @@ def _pipeline_compose(name):
         if not active:
             save_state(name, stage="error", msg="没有可合成的内容（所有句子已被删除）")
             return
-
-        # Redistribute timeline proportional to recording durations.
-        # Each sentence gets time proportional to its actual recording length,
-        # keeping total duration equal to the original video.
-        rec_dir = d / "recordings"
-        weights = []
-        for i, seg in enumerate(sentences, 1):
-            if i in deleted:
-                weights.append(0)
-                continue
-            rec = rec_dir / f"s_{i:03d}.webm"
-            if not rec.exists():
-                rec = rec_dir / f"s_{i:03d}_clone.webm"
-            if not rec.exists():
-                rec = rec_dir / f"s_{i:03d}.wav"
-            if rec.exists():
-                probe = subprocess.run(
-                    [FFMPEG, "-i", str(rec)],
-                    capture_output=True)
-                m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", (probe.stderr or b"").decode("utf-8", errors="ignore"))
-                dur = int(m.group(1))*3600 + int(m.group(2))*60 + float(m.group(3)) if m else 0
-                weights.append(max(dur, 0.5))
-            else:
-                weights.append(0)  # no recording → fallback to original timing
-        total_w = sum(w for w in weights if w > 0)
-        if total_w > 0:
-            video_dur = state.get("duration", sentences[-1]["end"] if sentences else 0)
-            # Count non-deleted sentences that have recordings
-            has_rec_count = sum(1 for idx, (i, seg) in enumerate(active) if weights[i-1] > 0)
-            no_rec_total = sum(seg["end"] - seg["start"] for i, seg in active if weights[i-1] == 0)
-            # Recording sentences share the remaining time proportionally
-            rec_share = max(video_dur - no_rec_total, 0)
-            cursor = 0.0
-            for i, seg in enumerate(sentences, 1):
-                if i in deleted:
-                    continue
-                w = weights[i-1]
-                if w > 0:
-                    seg_dur = (w / total_w) * rec_share
-                    seg["start"] = round(cursor, 2)
-                    seg["end"] = round(cursor + seg_dur, 2)
-                    cursor = seg["end"]
-                else:
-                    orig_dur = seg["end"] - seg["start"]
-                    seg["start"] = round(cursor, 2)
-                    seg["end"] = round(cursor + orig_dur, 2)
-                    cursor = seg["end"]
-            # Clamp last sentence to exact video duration
-            last_active = active[-1]
-            sentences[last_active[0]-1]["end"] = round(video_dur, 2)
 
         save_state(name, stage="composing", msg="提取片段...")
         tmp_dir = d / "_compose_segments"
