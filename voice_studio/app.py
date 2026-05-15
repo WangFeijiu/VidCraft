@@ -1030,25 +1030,12 @@ def _pipeline_match(name, user_text):
         }, namespace='/')
 
         # Build final timeline: uploaded text over the ORIGINAL video timeline.
-        # The video duration NEVER changes — we just redistribute the original
-        # [0, video_end] span across the N uploaded sentences proportionally.
+        # The video duration NEVER changes — redistribute [0, video_end]
+        # proportionally by TEXT LENGTH (not by unreliable LLM time ranges).
         video_end = sentences[-1]["end"] if sentences else 0
 
-        # Use matched ranges to compute a weight (duration hint) per sentence,
-        # then normalize so the total exactly equals video_end.
-        weights = []
-        for i in range(total_user):
-            if i in result_map:
-                r = result_map[i]
-                dur = r["end"] - r["start"]
-                weights.append(max(dur, 0.1))
-            else:
-                # Unmatched: estimate from neighbouring matches
-                weights.append(1.0)
-
+        weights = [max(len(t.strip()), 2) for t in user_text]
         total_weight = sum(weights)
-        if total_weight <= 0:
-            total_weight = total_user
 
         final = []
         cursor = 0.0
@@ -1056,7 +1043,6 @@ def _pipeline_match(name, user_text):
             share = (weights[i] / total_weight) * video_end
             st = round(cursor, 2)
             en = round(cursor + share, 2)
-            # Clamp last sentence to exact video_end
             if i == total_user - 1:
                 en = round(video_end, 2)
             source = []
