@@ -1029,37 +1029,92 @@ def _pipeline_match(name, user_text):
             'progress': 100
         }, namespace='/')
 
-        # Build final result
-        final = []
+        # Build raw result from LLM matches
+        raw = []
         for i in range(total_user):
             if i in result_map:
                 r = result_map[i]
-                final.append({
+                raw.append({
                     "text": user_text[i],
                     "start": r["start"],
                     "end": r["end"],
-                    "source": list(range(r["orig_start"]+1, r["orig_end"]+2))  # 1-based
+                    "matched": True,
+                    "source": list(range(r["orig_start"]+1, r["orig_end"]+2))
                 })
             else:
-                # Fallback: interpolate
-                prev_end = 0.0
-                next_start = sentences[-1]["end"] if sentences else 0.0
-                for j in range(i - 1, -1, -1):
-                    if j in result_map:
-                        prev_end = result_map[j]["end"]
-                        break
-                for j in range(i + 1, total_user):
-                    if j in result_map:
-                        next_start = result_map[j]["start"]
-                        break
-                est_start = (prev_end + next_start) / 2
-                est_end = est_start + 1.0
-                final.append({
+                raw.append({
                     "text": user_text[i],
-                    "start": est_start,
-                    "end": est_end,
+                    "start": None,
+                    "end": None,
+                    "matched": False,
                     "source": []
                 })
+
+        # Step 1: Redistribute overlapping matched segments proportionally
+        # Find groups of consecutive overlapping sentences and split the
+        # combined time range equally among them.
+        i = 0
+        while i < len(raw):
+            if not raw[i]["matched"]:
+                i += 1
+                continue
+            group_start = i
+            group_end_ts = raw[i]["end"]
+            # Extend group while next sentence overlaps with current group end
+            j = i + 1
+            while j < len(raw) and raw[j]["matched"] and raw[j]["start"] < group_end_ts:
+                group_end_ts = max(group_end_ts, raw[j]["end"])
+                j += 1
+            group = list(range(group_start, j))
+            if len(group) > 1:
+                span_start = raw[group[0]]["start"]
+                span_end = group_end_ts
+                dur_each = (span_end - span_start) / len(group)
+                for k, idx in enumerate(group):
+                    raw[idx]["start"] = round(span_start + k * dur_each, 2)
+                    raw[idx]["end"] = round(span_start + (k + 1) * dur_each, 2)
+            i = j
+
+        # Step 2: Assign fallback timestamps for unmatched sentences
+        video_end = sentences[-1]["end"] if sentences else 0
+        i = 0
+        while i < len(raw):
+            if raw[i]["matched"]:
+                i += 1
+                continue
+            # Find the run of consecutive unmatched sentences
+            run_start = i
+            while i < len(raw) and not raw[i]["matched"]:
+                i += 1
+            run_end = i  # exclusive
+            run_len = run_end - run_start
+            # Determine available gap
+            prev_end = raw[run_start - 1]["end"] if run_start > 0 else 0.0
+            next_start = raw[run_end]["start"] if run_end < len(raw) else video_end
+            gap = max(next_start - prev_end, 0.5 * run_len)
+            seg_dur = max(gap / run_len, 0.5)
+            for k in range(run_len):
+                idx = run_start + k
+                raw[idx]["start"] = round(prev_end + k * seg_dur, 2)
+                raw[idx]["end"] = round(prev_end + (k + 1) * seg_dur, 2)
+
+        # Step 3: Final pass — enforce strict monotonic ordering
+        final = []
+        for i in range(len(raw)):
+            st = raw[i]["start"]
+            en = raw[i]["end"]
+            if final:
+                prev_end = final[-1]["end"]
+                if st < prev_end:
+                    dur = en - st
+                    st = prev_end
+                    en = st + dur
+            final.append({
+                "text": raw[i]["text"],
+                "start": round(st, 2),
+                "end": round(en, 2),
+                "source": raw[i].get("source", [])
+            })
 
         (pd(name) / "sentences_uploaded.json").write_text(json.dumps(final, ensure_ascii=False, indent=2), "utf-8")
 
