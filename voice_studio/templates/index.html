@@ -1405,15 +1405,11 @@ async function uploadSubtitles() {
         const a = JSON.parse(text);
         if(Array.isArray(a) && a.length > 0 && a[0].start !== undefined && a[0].end !== undefined) {
           const parsed = a.map(s => ({text: s.text||'', start: s.start, end: s.end}));
-          const ok = await showConfirm('精准字幕', `检测到 ${parsed.length} 句带时间戳的 JSON 字幕。\n\n选择「确定」直接使用时间戳（可二次编辑）；\n选择「取消」则只提取文本进行语义匹配。`);
-          if(ok) {
-            await fetch(API+'/api/project/'+curProj+'/sentences', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'precise', sentences:parsed})});
-            await fetch(API+'/api/project/'+curProj+'/select-version', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'precise'})});
-            await refreshWork();
-            toast(`已导入 ${parsed.length} 句精准字幕，可编辑后进入录音`,'success');
-            return;
-          }
-          lines = a.map(s => typeof s==='string' ? s : s.text);
+          await fetch(API+'/api/project/'+curProj+'/sentences', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'precise', sentences:parsed})});
+          await fetch(API+'/api/project/'+curProj+'/select-version', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'precise'})});
+          await refreshWork();
+          toast(`已导入 ${parsed.length} 句精准字幕，可编辑后进入录音`,'success');
+          return;
         } else {
           lines = a.map(s => typeof s==='string' ? s : s.text);
         }
