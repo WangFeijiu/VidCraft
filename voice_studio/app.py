@@ -296,6 +296,14 @@ def api_delete_version(name, version):
         save_state(name, recording_version="original")
     return jsonify({"ok": True})
 
+@app.route("/api/project/<name>/select-version", methods=["POST"])
+def api_select_version(name):
+    data = request.json or {}
+    version = data.get("version", "")
+    if version in ("original", "optimized", "uploaded", "precise"):
+        save_state(name, recording_version=version)
+    return jsonify({"ok": True})
+
 @app.route("/api/project/<name>/has-recordings")
 def api_has_recordings(name):
     rec_dir = pd(name) / "recordings"
