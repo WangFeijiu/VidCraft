@@ -332,13 +332,8 @@ def api_delete_rec(name, idx):
 
 @app.route("/api/project/<name>/recorded")
 def api_recorded(name):
-    # Only count an idx as "manual recording" when the user explicitly chose
-    # manual. accept-clone copies the clone audio onto s_<idx>.webm so the
-    # composer can find it, which would otherwise make the manual playback
-    # button light up for clone-accepted sentences. Legacy projects with no
-    # selected_sources entry default to manual.
     state = load_state(name)
-    selected = state.get("selected_sources", {})
+    selected = state.get("selected_sources", {}) or {}
     out = []
     for f in (pd(name) / "recordings").glob("s_*.webm"):
         if "_clone" in f.name:
@@ -347,8 +342,7 @@ def api_recorded(name):
             idx = int(f.name.split("_")[1].split(".")[0])
         except (ValueError, IndexError):
             continue
-        src = selected.get(str(idx))
-        if src is None or src == "manual":
+        if selected.get(str(idx)) == "manual":
             out.append(idx)
     return jsonify(out)
 
@@ -382,22 +376,21 @@ def api_get_clone(name, idx):
 
 @app.route("/api/project/<name>/accept-clone/<int:idx>", methods=["POST"])
 def api_accept_clone(name, idx):
+    # Just mark selection; don't copy file to s_XXX.webm anymore.
     state = load_state(name)
     selected = state.get("selected_sources", {}) or {}
     if selected.get(str(idx)) == "manual":
         return jsonify({"ok": True, "skipped": "manual recording exists"})
-    src = pd(name) / "recordings" / f"s_{idx:03d}_clone.webm"
-    dst = pd(name) / "recordings" / f"s_{idx:03d}.webm"
-    if src.exists():
-        shutil.copy2(str(src), str(dst))
-        return jsonify({"ok": True})
-    return jsonify({"error": "克隆音频不存在"}), 404
+    selected[str(idx)] = "clone"
+    save_state(name, selected_sources=selected)
+    return jsonify({"ok": True})
 
 @app.route("/api/project/<name>/reject-clone/<int:idx>", methods=["POST"])
 def api_reject_clone(name, idx):
-    # Remove accepted recording if it was a clone, but keep clone file
-    dst = pd(name) / "recordings" / f"s_{idx:03d}.webm"
-    dst.unlink(missing_ok=True)
+    state = load_state(name)
+    selected = state.get("selected_sources", {}) or {}
+    selected.pop(str(idx), None)
+    save_state(name, selected_sources=selected)
     return jsonify({"ok": True})
 
 @app.route("/api/project/<name>/accept-all-clones", methods=["POST"])
@@ -410,8 +403,6 @@ def api_accept_all_clones(name):
         idx_str = f.name.split("_")[1]
         if selected.get(idx_str) == "manual":
             continue
-        dst = d / f"s_{idx_str}.webm"
-        shutil.copy2(str(f), str(dst))
         selected[idx_str] = "clone"
         count += 1
     save_state(name, selected_sources=selected)
@@ -1452,14 +1443,29 @@ def _pipeline_compose(name):
         srt_entries = []
         time_offset = 0.0
 
+        selected_sources = state.get("selected_sources", {}) or {}
+
         for seg_idx, (i, seg) in enumerate(active):
             seg_start, seg_end = seg["start"], seg["end"]
             seg_dur = seg_end - seg_start
             seg_video = tmp_dir / f"seg_{seg_idx:04d}.mp4"
 
-            rec = d / "recordings" / f"s_{i:03d}.webm"
-            if not rec.exists():
+            # Pick recording based on selected_sources
+            sel = selected_sources.get(str(i))
+            rec = None
+            if sel == "manual":
+                rec = d / "recordings" / f"s_{i:03d}.webm"
+                if not rec.exists():
+                    rec = None
+            elif sel == "clone":
                 rec = d / "recordings" / f"s_{i:03d}_clone.webm"
+                if not rec.exists():
+                    rec = d / "recordings" / f"s_{i:03d}.webm"
+            else:
+                # No explicit selection: prefer manual, fallback to clone
+                rec = d / "recordings" / f"s_{i:03d}.webm"
+                if not rec.exists():
+                    rec = d / "recordings" / f"s_{i:03d}_clone.webm"
 
             if rec.exists():
                 # Convert recording to normalized WAV
