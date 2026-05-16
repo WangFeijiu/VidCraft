@@ -1928,8 +1928,15 @@ function selectRecItem(i) {
   scrollToActive();
 }
 function scrollToActive() {
-  const el = document.querySelector('.rec-list .rec-item.active');
-  if(el) el.scrollIntoView({block:'nearest', behavior:'smooth'});
+  const list = document.getElementById('rec-list');
+  const el = list ? list.querySelector('.rec-item.active') : null;
+  if(!el || !list) return;
+  // Scroll only the rec-list container, not the page
+  const listRect = list.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  if(elRect.top < listRect.top || elRect.bottom > listRect.bottom) {
+    list.scrollTop += elRect.top - listRect.top - listRect.height / 3;
+  }
 }
 let autoPlayPaused = false, rejectedSet = new Set(), selectedSource = {}, deletedSet = new Set();  // {idx: 'clone'|'manual'}
 function onPlayerEnded() {
