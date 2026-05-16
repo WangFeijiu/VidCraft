@@ -381,7 +381,7 @@ def api_recorded(name):
 @app.route("/api/project/<name>/cloned")
 def api_cloned(name):
     return jsonify([int(f.name.split("_")[1])
-                    for f in (pd(name) / "recordings").glob("s_*_clone.webm")])
+                    for f in (pd(name) / "recordings").glob("s_*_clone.wav")])
 
 @app.route("/api/project/<name>/selected-sources")
 def api_selected_sources(name):
@@ -403,8 +403,8 @@ def api_select_source(name, idx):
 
 @app.route("/api/project/<name>/clone-audio/<int:idx>")
 def api_get_clone(name, idx):
-    p = pd(name) / "recordings" / f"s_{idx:03d}_clone.webm"
-    return send_file(str(p), mimetype="audio/webm") if p.exists() else ("", 404)
+    p = pd(name) / "recordings" / f"s_{idx:03d}_clone.wav"
+    return send_file(str(p), mimetype="audio/wav") if p.exists() else ("", 404)
 
 @app.route("/api/project/<name>/accept-clone/<int:idx>", methods=["POST"])
 def api_accept_clone(name, idx):
@@ -431,7 +431,7 @@ def api_accept_all_clones(name):
     state = load_state(name)
     selected = state.get("selected_sources", {})
     count = 0
-    for f in d.glob("s_*_clone.webm"):
+    for f in d.glob("s_*_clone.wav"):
         idx_str = f.name.split("_")[1]
         idx_key = str(int(idx_str))
         if selected.get(idx_key) == "manual":
@@ -447,7 +447,7 @@ def api_clone_preview_all(name):
     d = pd(name) / "recordings"
     out = d / "_all_clones_preview.webm"
     # Build list of clone files in order
-    files = sorted(d.glob("s_*_clone.webm"))
+    files = sorted(d.glob("s_*_clone.wav"))
     if not files:
         return jsonify({"error": "没有克隆录音"}), 404
     # Concatenate using ffmpeg concat demuxer
@@ -471,7 +471,7 @@ def api_clone_preview_all(name):
     return send_file(str(out), mimetype="audio/webm")
 def api_clear_clones(name):
     """Delete all clone audio files so cloning can restart with a new voice."""
-    count = sum(1 for _ in (pd(name) / "recordings").glob("s_*_clone.webm"))
+    count = sum(1 for _ in (pd(name) / "recordings").glob("s_*_clone.wav"))
     _clear_stale_clones(name)
     save_state(name, stage="recording", msg="", clone_progress=[0, 0], voice_id="", clone_prompt_text="")
     return jsonify({"ok": True, "deleted": count})
@@ -510,7 +510,7 @@ def api_regen_clone(name, idx):
                     seg["text"], voice["instruct"], ref_wav, stream=False)):
                 wav_out = d / "recordings" / f"s_{idx:03d}_clone.wav"
                 torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
-                webm_out = d / "recordings" / f"s_{idx:03d}_clone.webm"
+                webm_out = d / "recordings" / f"s_{idx:03d}_clone.wav"
                 subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
                                 "-c:a", "libopus", "-b:a", "128k", str(webm_out)],
                                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -535,7 +535,7 @@ def api_regen_clone(name, idx):
                 seg["text"], full_prompt, sample_path, stream=False)):
                 wav_out = d / "recordings" / f"s_{idx:03d}_clone.wav"
                 torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
-                webm_out = d / "recordings" / f"s_{idx:03d}_clone.webm"
+                webm_out = d / "recordings" / f"s_{idx:03d}_clone.wav"
                 subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
                                 "-c:a", "libopus", "-b:a", "128k", str(webm_out)],
                                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -546,7 +546,7 @@ def api_regen_clone(name, idx):
         state = load_state(name)
         sel = (state.get("selected_sources", {}) or {}).get(str(idx))
         if sel == "clone":
-            shutil.copy2(str(d / "recordings" / f"s_{idx:03d}_clone.webm"),
+            shutil.copy2(str(d / "recordings" / f"s_{idx:03d}_clone.wav"),
                          str(d / "recordings" / f"s_{idx:03d}.webm"))
         return jsonify({"ok": True})
     except Exception as e:
@@ -1187,7 +1187,7 @@ def _clear_stale_clones(name):
     rec_dir = pd(name) / "recordings"
     if not rec_dir.exists():
         return
-    for f in rec_dir.glob("s_*_clone.webm"):
+    for f in rec_dir.glob("s_*_clone.wav"):
         f.unlink(missing_ok=True)
     for f in rec_dir.glob("s_*_clone.wav"):
         f.unlink(missing_ok=True)
@@ -1270,7 +1270,7 @@ def api_resume_clone(name):
 def api_cancel_clone(name):
     """Cancel an in-progress cloning task and clear all clone data."""
     _cancel_clone.add(name)
-    count = sum(1 for _ in (pd(name) / "recordings").glob("s_*_clone.webm"))
+    count = sum(1 for _ in (pd(name) / "recordings").glob("s_*_clone.wav"))
     _clear_stale_clones(name)
     save_state(name, stage="recording", msg="", clone_progress=[0, 0], voice_id="", clone_prompt_text="")
     return jsonify({"ok": True, "deleted": count})
@@ -1508,14 +1508,14 @@ def _pipeline_compose(name):
                 if not rec.exists():
                     rec = None
             elif sel == "clone":
-                rec = d / "recordings" / f"s_{i:03d}_clone.webm"
+                rec = d / "recordings" / f"s_{i:03d}_clone.wav"
                 if not rec.exists():
                     rec = d / "recordings" / f"s_{i:03d}.webm"
             else:
                 # No explicit selection: prefer manual, fallback to clone
                 rec = d / "recordings" / f"s_{i:03d}.webm"
                 if not rec.exists():
-                    rec = d / "recordings" / f"s_{i:03d}_clone.webm"
+                    rec = d / "recordings" / f"s_{i:03d}_clone.wav"
 
             if rec.exists():
                 # Convert recording to normalized WAV, then pad/trim to seg_dur
@@ -1673,7 +1673,7 @@ def _pipeline_voice_clone(name, prompt_text, voice_id=""):
 
         # Check which sentences already have clone files (resume support)
         rec_dir = d / "recordings"
-        done = sum(1 for i in range(total) if (rec_dir / f"s_{i+1:03d}_clone.webm").exists())
+        done = sum(1 for i in range(total) if (rec_dir / f"s_{i+1:03d}_clone.wav").exists())
         if done >= total:
             save_state(name, stage="recording", msg="音色克隆完成，可试听或直接生成视频")
             return
@@ -1700,17 +1700,13 @@ def _pipeline_voice_clone(name, prompt_text, voice_id=""):
                 if name in _cancel_clone:
                     _cancel_clone.discard(name)
                     return
-                if (rec_dir / f"s_{i+1:03d}_clone.webm").exists():
+                if (rec_dir / f"s_{i+1:03d}_clone.wav").exists():
                     continue  # Skip already cloned
                 for j, result in enumerate(model.inference_instruct2(
                         seg["text"], voice["instruct"], ref_wav, stream=False)):
                     wav_out = d / "recordings" / f"s_{i+1:03d}_clone.wav"
                     torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
-                    webm_out = d / "recordings" / f"s_{i+1:03d}_clone.webm"
-                    subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
-                                    "-c:a", "libopus", "-b:a", "128k", str(webm_out)],
-                                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    wav_out.unlink(missing_ok=True)
+                    pass  # Keep wav as-is, no lossy conversion
                 save_state(name, stage="cloning",
                            msg=f"音色克隆中 {i+1}/{total}...",
                            clone_progress=[i + 1, total])
@@ -1726,17 +1722,13 @@ def _pipeline_voice_clone(name, prompt_text, voice_id=""):
                 if name in _cancel_clone:
                     _cancel_clone.discard(name)
                     return
-                if (rec_dir / f"s_{i+1:03d}_clone.webm").exists():
+                if (rec_dir / f"s_{i+1:03d}_clone.wav").exists():
                     continue  # Skip already cloned
                 for j, result in enumerate(model.inference_zero_shot(
                         seg["text"], full_prompt, sample_path, stream=False)):
                     wav_out = d / "recordings" / f"s_{i+1:03d}_clone.wav"
                     torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
-                    webm_out = d / "recordings" / f"s_{i+1:03d}_clone.webm"
-                    subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
-                                    "-c:a", "libopus", "-b:a", "128k", str(webm_out)],
-                                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    wav_out.unlink(missing_ok=True)
+                    pass  # Keep wav as-is, no lossy conversion
                 save_state(name, stage="cloning",
                            msg=f"音色克隆中 {i+1}/{total}...",
                            clone_progress=[i + 1, total])
