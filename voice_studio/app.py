@@ -1673,16 +1673,12 @@ def _pipeline_voice_clone(name, prompt_text, voice_id=""):
         is_custom = voice_id.startswith("custom_") and (CUSTOM_VOICES_DIR / voice_id / "sample.wav").exists()
         use_instruct = voice is not None and "CosyVoice" in model_name and "300M" not in model_name
 
-        # For zero-shot mode, auto-transcribe the sample so prompt_text matches the audio content.
-        # This prevents reference-audio content from leaking into synthesized output.
+        # For zero-shot mode, use the prompt_text from the request (or state).
+        # Skip auto-transcription as faster-whisper deadlocks in gevent threads.
         if not use_instruct:
-            sample_wav = d / "voice_sample.wav"
-            if sample_wav.exists():
-                transcribed = _transcribe_sample(sample_wav)
-                if transcribed:
-                    prompt_text = transcribed
-                    # Save back to state so resume-clone uses the correct prompt
-                    save_state(name, clone_prompt_text=prompt_text)
+            saved_prompt = load_state(name).get("clone_prompt_text", "")
+            if saved_prompt and not prompt_text:
+                prompt_text = saved_prompt
 
         if use_instruct:
             # Voice library mode: use inference_instruct2
