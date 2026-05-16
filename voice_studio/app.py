@@ -512,7 +512,7 @@ def api_regen_clone(name, idx):
                 torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
                 webm_out = d / "recordings" / f"s_{idx:03d}_clone.webm"
                 subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
-                                "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
+                                "-c:a", "libopus", "-b:a", "128k", str(webm_out)],
                                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 wav_out.unlink(missing_ok=True)
         else:
@@ -537,7 +537,7 @@ def api_regen_clone(name, idx):
                 torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
                 webm_out = d / "recordings" / f"s_{idx:03d}_clone.webm"
                 subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
-                                "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
+                                "-c:a", "libopus", "-b:a", "128k", str(webm_out)],
                                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 wav_out.unlink(missing_ok=True)
         # If the user previously accept-cloned this sentence, the composer reads
@@ -1315,7 +1315,7 @@ def api_voice_preview(name):
             wav_out = VOICE_CACHE / f"{voice_id}.wav"
             torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
             subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
-                            "-c:a", "libopus", "-b:a", "64k", str(cache_path)],
+                            "-c:a", "libopus", "-b:a", "128k", str(cache_path)],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             wav_out.unlink(missing_ok=True)
         if cache_path.exists():
@@ -1354,7 +1354,7 @@ def api_save_voice():
     # Use the original recording as preview (no TTS generation)
     preview_path = voice_dir / "preview.webm"
     subprocess.run([FFMPEG, "-y", "-i", str(wav_path),
-                    "-c:a", "libopus", "-b:a", "64k", str(preview_path)],
+                    "-c:a", "libopus", "-b:a", "128k", str(preview_path)],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Save metadata
@@ -1695,7 +1695,7 @@ def _pipeline_voice_clone(name, prompt_text, voice_id=""):
                     torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
                     webm_out = d / "recordings" / f"s_{i+1:03d}_clone.webm"
                     subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
-                                    "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
+                                    "-c:a", "libopus", "-b:a", "128k", str(webm_out)],
                                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     wav_out.unlink(missing_ok=True)
                 save_state(name, stage="cloning",
@@ -1721,7 +1721,7 @@ def _pipeline_voice_clone(name, prompt_text, voice_id=""):
                     torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
                     webm_out = d / "recordings" / f"s_{i+1:03d}_clone.webm"
                     subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
-                                    "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
+                                    "-c:a", "libopus", "-b:a", "128k", str(webm_out)],
                                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     wav_out.unlink(missing_ok=True)
                 save_state(name, stage="cloning",
