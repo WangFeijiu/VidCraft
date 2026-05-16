@@ -1417,7 +1417,15 @@ async function uploadSubtitles() {
         } else {
           lines = a.map(s => typeof s==='string' ? s : s.text);
         }
-      } catch { lines = text.split('\n').map(l=>l.trim()).filter(Boolean); }
+      } catch {
+        // JSON.parse failed — try to extract "text" fields with regex
+        const textMatches = [...text.matchAll(/"text"\s*:\s*"([^"]+)"/g)].map(m => m[1]);
+        if(textMatches.length > 0) {
+          lines = textMatches;
+        } else {
+          lines = text.split('\n').map(l=>l.trim()).filter(l => l && !(/^[\[\]{},]$/.test(l)) && !(/^"(start|end)"/.test(l)));
+        }
+      }
     }
     else lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
     if(!lines.length) { toast('未解析到内容','warn'); return; }
