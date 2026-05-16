@@ -105,13 +105,17 @@ def _active_sentences_path(name):
     d = pd(name)
     state = load_state(name)
     v = state.get("recording_version", "")
+    if v == "precise" and (d / "sentences_precise.json").exists():
+        return d / "sentences_precise.json"
     if v == "uploaded" and (d / "sentences_uploaded.json").exists():
         return d / "sentences_uploaded.json"
     if v == "optimized" and (d / "sentences_optimized.json").exists():
         return d / "sentences_optimized.json"
     if v == "original" and (d / "sentences.json").exists():
         return d / "sentences.json"
-    # Fallback to priority: uploaded > optimized > original
+    # Fallback to priority: precise > uploaded > optimized > original
+    if (d / "sentences_precise.json").exists():
+        return d / "sentences_precise.json"
     if (d / "sentences_uploaded.json").exists():
         return d / "sentences_uploaded.json"
     if (d / "sentences_optimized.json").exists():
@@ -203,7 +207,9 @@ def api_get_sents(name):
     """Get sentences with version info. Returns {active: 'original'|'optimized'|'uploaded', versions: {original: [...], ...}, sentences: [...]}"""
     d = pd(name)
     versions = {}
-    # Build in display-priority order: uploaded > optimized > original
+    # Build in display-priority order: precise > uploaded > optimized > original
+    if (d / "sentences_precise.json").exists():
+        versions['precise'] = json.loads((d / "sentences_precise.json").read_text("utf-8"))
     if (d / "sentences_uploaded.json").exists():
         versions['uploaded'] = json.loads((d / "sentences_uploaded.json").read_text("utf-8"))
     if (d / "sentences_optimized.json").exists():
@@ -211,13 +217,18 @@ def api_get_sents(name):
     if (d / "sentences.json").exists():
         versions['original'] = json.loads((d / "sentences.json").read_text("utf-8"))
 
-    # Priority: uploaded > optimized > original (editing stage)
+    # Priority: precise > uploaded > optimized > original (editing stage)
     # In recording stage, use the locked recording_version if set
     state = load_state(name)
     if state.get("stage") == "recording" and state.get("recording_version") in versions:
         active = state["recording_version"]
     else:
-        active = 'uploaded' if 'uploaded' in versions else ('optimized' if 'optimized' in versions else 'original')
+        for v in ('precise', 'uploaded', 'optimized', 'original'):
+            if v in versions:
+                active = v
+                break
+        else:
+            active = 'original'
     sentences = versions.get(active, [])
 
     return jsonify({'active': active, 'versions': versions, 'sentences': sentences})
@@ -307,7 +318,7 @@ def api_set_stage(name):
         # Lock the recording version so refreshWork uses the correct sentences
         if stage == "recording":
             version = data.get("version", "")
-            if version in ("original", "optimized", "uploaded"):
+            if version in ("original", "optimized", "uploaded", "precise"):
                 updates["recording_version"] = version
         save_state(name, **updates)
     return jsonify({"ok": True})
@@ -716,12 +727,16 @@ def api_export(name):
     version = request.args.get("version", "")
     d = pd(name)
     # Use specified version, fallback to priority
-    if version == 'optimized' and (d / "sentences_optimized.json").exists():
+    if version == 'precise' and (d / "sentences_precise.json").exists():
+        p = d / "sentences_precise.json"
+    elif version == 'optimized' and (d / "sentences_optimized.json").exists():
         p = d / "sentences_optimized.json"
     elif version == 'uploaded' and (d / "sentences_uploaded.json").exists():
         p = d / "sentences_uploaded.json"
     elif version == 'original':
         p = d / "sentences.json"
+    elif (d / "sentences_precise.json").exists():
+        p = d / "sentences_precise.json"
     elif (d / "sentences_uploaded.json").exists():
         p = d / "sentences_uploaded.json"
     elif (d / "sentences_optimized.json").exists():
