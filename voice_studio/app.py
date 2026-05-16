@@ -283,6 +283,19 @@ def api_put_sents(name):
 
     return jsonify({"ok": True, "changed_indices": changed_indices})
 
+@app.route("/api/project/<name>/sentences/<version>", methods=["DELETE"])
+def api_delete_version(name, version):
+    if version == "original":
+        return jsonify({"error": "不能删除原始转写"}), 400
+    filename = f"sentences_{version}.json"
+    filepath = pd(name) / filename
+    if filepath.exists():
+        filepath.unlink()
+    state = load_state(name)
+    if state.get("recording_version") == version:
+        save_state(name, recording_version="original")
+    return jsonify({"ok": True})
+
 @app.route("/api/project/<name>/has-recordings")
 def api_has_recordings(name):
     rec_dir = pd(name) / "recordings"

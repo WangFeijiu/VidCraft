@@ -791,7 +791,21 @@ function switchVersion(version) {
   activeVersion = version;
   sentences = sentenceVersions[version];
   renderEditor(document.getElementById('work-body'));
-  toast(`已切换到：${version === 'original' ? '原始转写' : version === 'optimized' ? 'AI 优化' : '用户上传'}`, 'success');
+  const versionNames = {original: '原始转写', optimized: 'AI 优化', uploaded: '语义匹配', precise: '精准字幕'};
+  toast(`已切换到：${versionNames[version]||version}`, 'success');
+}
+async function deleteVersion(version) {
+  if(version === 'original') return;
+  const versionNames = {optimized: 'AI 优化', uploaded: '语义匹配', precise: '精准字幕'};
+  if(!await showConfirm('删除版本', `确定删除「${versionNames[version]||version}」版本？此操作不可恢复。`)) return;
+  await fetch(API+'/api/project/'+curProj+'/sentences/'+version, {method:'DELETE'});
+  delete sentenceVersions[version];
+  if(activeVersion === version) {
+    activeVersion = sentenceVersions['original'] ? 'original' : Object.keys(sentenceVersions)[0];
+    sentences = sentenceVersions[activeVersion] || [];
+  }
+  renderEditor(document.getElementById('work-body'));
+  toast('版本已删除','success');
 }
 
 
@@ -1070,10 +1084,10 @@ function renderEditor(body) {
   const availableVersions = Object.keys(sentenceVersions).sort((a, b) => versionOrder.indexOf(a) - versionOrder.indexOf(b));
   let versionHtml = '';
   if(availableVersions.length > 1) {
-    versionHtml = `<div style="margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:6px;display:flex;align-items:center;gap:8px">
+    versionHtml = `<div style="margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span style="font-size:13px;color:#666">字幕版本：</span>
       ${availableVersions.map(v =>
-        `<button class="btn-sm" style="background:${v===activeVersion?'#007bff':'#6c757d'}" onclick="switchVersion('${v}')">${versionNames[v]||v}</button>`
+        `<span style="display:inline-flex;align-items:center;gap:2px"><button class="btn-sm" style="background:${v===activeVersion?'#007bff':'#6c757d'}" onclick="switchVersion('${v}')">${versionNames[v]||v}</button>${v!=='original'?`<span onclick="deleteVersion('${v}')" style="cursor:pointer;font-size:11px;color:#d9534f;padding:0 4px" title="删除此版本">✕</span>`:''}</span>`
       ).join('')}
       <button class="btn-sm" style="background:#17a2b8;margin-left:8px" onclick="showCompareModal()">📊 版本对比</button>
       <span style="margin-left:auto;font-size:12px;color:#888">当前：${versionNames[activeVersion]||activeVersion}</span>
