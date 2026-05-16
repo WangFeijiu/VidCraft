@@ -401,9 +401,10 @@ def api_accept_all_clones(name):
     count = 0
     for f in d.glob("s_*_clone.webm"):
         idx_str = f.name.split("_")[1]
-        if selected.get(idx_str) == "manual":
+        idx_key = str(int(idx_str))
+        if selected.get(idx_key) == "manual":
             continue
-        selected[idx_str] = "clone"
+        selected[idx_key] = "clone"
         count += 1
     save_state(name, selected_sources=selected)
     return jsonify({"ok": True, "count": count})
