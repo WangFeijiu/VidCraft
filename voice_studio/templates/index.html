@@ -1402,7 +1402,8 @@ async function uploadSubtitles() {
     }
     else if(file.name.endsWith('.json')) {
       try {
-        const a = JSON.parse(text);
+        const cleaned = text.replace(/^```json\s*\n?/m, '').replace(/\n?```\s*$/m, '').trim();
+        const a = JSON.parse(cleaned);
         if(Array.isArray(a) && a.length > 0 && a[0].start !== undefined && a[0].end !== undefined) {
           const parsed = a.map(s => ({text: s.text||'', start: s.start, end: s.end}));
           await fetch(API+'/api/project/'+curProj+'/sentences', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'precise', sentences:parsed})});
