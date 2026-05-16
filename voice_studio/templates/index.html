@@ -1956,9 +1956,10 @@ function onPlayerEnded() {
 }
 function showCountdown(n) {
   const detail = document.getElementById('rec-detail');
+  const list = document.getElementById('rec-list');
   if(!detail || autoPlayPaused) { return; }
+  const savedScroll = list ? list.scrollTop : 0;
   if(n <= 0) {
-    // Flash checkmark then go next
     detail.innerHTML = `<div style="text-align:center;padding:40px 20px"><div style="font-size:48px;color:#2a9d3f;animation:countPulse .5s ease">✓</div><p style="margin-top:8px;color:#2a9d3f;font-size:14px">已确认</p></div>`;
     setTimeout(() => {
       if(autoPlayPaused) return;
@@ -1966,10 +1967,11 @@ function showCountdown(n) {
       autoPlayPaused = false;
       playCurrentClone();
     }, 600);
-    return;
+  } else {
+    detail.innerHTML = `<div style="text-align:center;padding:40px 20px"><div style="font-size:64px;font-weight:700;color:#4a9eff;animation:countPulse 1s ease">${n}</div><p style="margin-top:8px;color:#2a9d3f;font-size:14px">✓ 自动接受</p><p style="margin-top:4px;color:#888;font-size:13px">下一句即将播放...</p><button onclick="stopAutoPlay()" style="margin-top:12px">⏸ 暂停</button></div>`;
+    setTimeout(() => showCountdown(n-1), 1000);
   }
-  detail.innerHTML = `<div style="text-align:center;padding:40px 20px"><div style="font-size:64px;font-weight:700;color:#4a9eff;animation:countPulse 1s ease">${n}</div><p style="margin-top:8px;color:#2a9d3f;font-size:14px">✓ 自动接受</p><p style="margin-top:4px;color:#888;font-size:13px">下一句即将播放...</p><button onclick="stopAutoPlay()" style="margin-top:12px">⏸ 暂停</button></div>`;
-  setTimeout(() => showCountdown(n-1), 1000);
+  if(list) list.scrollTop = savedScroll;
 }
 function updateRecListItem(i) {
   const items = document.querySelectorAll('.rec-list .rec-item');
