@@ -2392,13 +2392,6 @@ async function startCompose() {
 
 let subStyle = null;
 async function goToSubtitlePreview() {
-  // Sync source selections first
-  for(let i=0;i<sentences.length;i++) {
-    const src = selectedSource[i+1];
-    if(src === 'clone' && clonedSet.has(i+1)) {
-      await fetch(API+'/api/project/'+curProj+'/accept-clone/'+(i+1),{method:'POST'});
-    }
-  }
   subStyle = await (await fetch(API+'/api/project/'+curProj+'/subtitle-style')).json();
   renderSubtitlePreview();
 }
