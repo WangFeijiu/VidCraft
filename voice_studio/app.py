@@ -382,6 +382,10 @@ def api_get_clone(name, idx):
 
 @app.route("/api/project/<name>/accept-clone/<int:idx>", methods=["POST"])
 def api_accept_clone(name, idx):
+    state = load_state(name)
+    selected = state.get("selected_sources", {}) or {}
+    if selected.get(str(idx)) == "manual":
+        return jsonify({"ok": True, "skipped": "manual recording exists"})
     src = pd(name) / "recordings" / f"s_{idx:03d}_clone.webm"
     dst = pd(name) / "recordings" / f"s_{idx:03d}.webm"
     if src.exists():
@@ -404,6 +408,8 @@ def api_accept_all_clones(name):
     count = 0
     for f in d.glob("s_*_clone.webm"):
         idx_str = f.name.split("_")[1]
+        if selected.get(idx_str) == "manual":
+            continue
         dst = d / f"s_{idx_str}.webm"
         shutil.copy2(str(f), str(dst))
         selected[idx_str] = "clone"
