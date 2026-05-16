@@ -70,7 +70,7 @@ def _get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
         from faster_whisper import WhisperModel
-        _whisper_model = WhisperModel("large-v3", device="cuda", compute_type="float16",
+        _whisper_model = WhisperModel("large-v3", device="cpu", compute_type="int8",
                                       download_root=HF_CACHE)
     return _whisper_model
 
