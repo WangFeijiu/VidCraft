@@ -1109,9 +1109,9 @@ function renderEditor(body) {
       </div>
     </div>
   </div>`;
-  html += `<p style="margin-bottom:8px;color:#888;font-size:13px">共 ${sentences.length} 句 · 勾选连续句子可合并</p>`;
+  html += `<p style="margin-bottom:8px;color:#888;font-size:13px">共 ${sentences.length} 句 · 勾选连续句子可合并 · 时间戳可直接编辑</p>`;
   html += sentences.map((s,i) =>
-    `<div class="sent-item" id="si-${i}"><input type="checkbox" class="chk" data-i="${i}" onchange="onCheckMerge(${i},this.checked)"><span class="idx">${i+1}</span><textarea class="sent-row" rows="1" data-i="${i}" oninput="autoGrow(this)">${s.text}</textarea><span class="dur">${fmtS(s.start)}→${fmtS(s.end)}</span></div>`
+    `<div class="sent-item" id="si-${i}"><input type="checkbox" class="chk" data-i="${i}" onchange="onCheckMerge(${i},this.checked)"><span class="idx">${i+1}</span><textarea class="sent-row" rows="1" data-i="${i}" oninput="autoGrow(this)">${s.text}</textarea><span class="dur"><input type="text" class="time-input" value="${fmtSS(s.start)}" data-i="${i}" data-field="start" onchange="onTimeChange(${i},'start',this.value)" style="width:52px;text-align:center;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px">→<input type="text" class="time-input" value="${fmtSS(s.end)}" data-i="${i}" data-field="end" onchange="onTimeChange(${i},'end',this.value)" style="width:52px;text-align:center;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px"></span></div>`
   ).join('');
   html += `<div style="margin-top:16px"><button class="primary" onclick="saveSentences(true)">💾 保存字幕，进入录音</button></div>`;
   body.innerHTML = html;
@@ -4036,6 +4036,30 @@ async function veReplaceAudio() {
 
 // ═══════════════════════════════════════════════════════════════
 function fmtS(s) { if(!s&&s!==0) return '?'; const m=Math.floor(s/60),sec=Math.floor(s%60); return m+':'+(sec<10?'0':'')+sec; }
+function fmtSS(s) { if(!s&&s!==0) return '0:00.00'; const m=Math.floor(s/60),sec=(s%60).toFixed(2); return m+':'+(parseFloat(sec)<10?'0':'')+sec; }
+function parseSS(str) {
+  str = str.trim();
+  const m = str.match(/^(\d+):(\d+(?:\.\d+)?)$/);
+  if(m) return parseInt(m[1])*60 + parseFloat(m[2]);
+  const m2 = str.match(/^(\d+(?:\.\d+)?)$/);
+  if(m2) return parseFloat(m2[1]);
+  return NaN;
+}
+function onTimeChange(i, field, val) {
+  const t = parseSS(val);
+  if(isNaN(t) || t < 0) { toast('时间格式错误，请用 m:ss.xx 格式','warn'); return; }
+  const prev = i > 0 ? sentences[i-1] : null;
+  const next = i < sentences.length-1 ? sentences[i+1] : null;
+  if(field === 'start') {
+    if(prev && t < prev.end) { toast(`起始时间不能早于上一句结束（${fmtSS(prev.end)}）`,'warn'); return; }
+    if(t >= sentences[i].end) { toast('起始时间不能晚于结束时间','warn'); return; }
+    sentences[i].start = t;
+  } else {
+    if(next && t > next.start) { toast(`结束时间不能晚于下一句开始（${fmtSS(next.start)}）`,'warn'); return; }
+    if(t <= sentences[i].start) { toast('结束时间不能早于起始时间','warn'); return; }
+    sentences[i].end = t;
+  }
+}
 function escHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
 function showImageZoom(url) {
