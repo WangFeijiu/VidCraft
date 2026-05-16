@@ -1469,7 +1469,7 @@ def _pipeline_compose(name):
                     rec = d / "recordings" / f"s_{i:03d}_clone.webm"
 
             if rec.exists():
-                # Convert recording to normalized WAV
+                # Convert recording to normalized WAV, then pad/trim to seg_dur
                 wav_tmp = tmp_dir / f"rec_{seg_idx}.wav"
                 subprocess.run([FFMPEG, "-y", "-i", str(rec), "-ar", str(SR),
                                 "-ac", "1", "-c:a", "pcm_s16le", str(wav_tmp)],
@@ -1479,17 +1479,24 @@ def _pipeline_compose(name):
                 if audio.ndim > 1: audio = audio.mean(axis=1)
                 mx = float(np.max(np.abs(audio)))
                 if mx > 0: audio = (audio / mx * 0.95).astype(np.float32)
+                # Pad with silence or trim to match the segment's video duration
+                target_samples = int(seg_dur * SR)
+                if len(audio) < target_samples:
+                    audio = np.concatenate([audio, np.zeros(target_samples - len(audio), dtype=np.float32)])
+                else:
+                    audio = audio[:target_samples]
                 rec_wav = tmp_dir / f"rec_{seg_idx}_norm.wav"
                 sf.write(str(rec_wav), audio, SR)
 
-                # Extract video segment + overlay recording audio
+                # Extract video segment + overlay recording audio (no -shortest now,
+                # since audio length already matches video length)
                 subprocess.run([
                     FFMPEG, "-y",
                     "-ss", str(seg_start), "-to", str(seg_end), "-i", str(inp),
                     "-i", str(rec_wav),
                     "-map", "0:v:0", "-map", "1:a:0",
                     "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                    "-c:a", "aac", "-b:a", "192k", "-shortest",
+                    "-c:a", "aac", "-b:a", "192k",
                     str(seg_video)
                 ], check=True, capture_output=True)
                 rec_wav.unlink(missing_ok=True)
