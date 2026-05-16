@@ -1899,7 +1899,7 @@ function renderManualRec() {
   for(let i=0;i<total;i++) {
     const confirmed = selectedSource[i+1];
     const isDeleted = deletedSet.has(i+1);
-    const badge = confirmed ? '<span class="rec-badge manual">✓</span>' : '';
+    const badge = confirmed === 'mute' ? '<span class="rec-badge manual" style="background:#f0f0f0;color:#888">🔇</span>' : confirmed ? '<span class="rec-badge manual">✓</span>' : '';
     const delMark = isDeleted ? '<span class="rec-del-mark" style="color:#d9534f;margin-left:4px">✕</span>' : '';
     const opacity = isDeleted ? 'opacity:0.5' : '';
     html += `<div class="rec-item ${i===idx?'active':''}" onclick="selectRecItem(${i})" style="${opacity}"><span class="rec-idx">${i+1}</span><span class="rec-text">${escHtml(sentences[i]?.text||'')}</span>${badge}${delMark}</div>`;
@@ -1956,6 +1956,12 @@ function renderRecDetail() {
         <button onclick="event.stopPropagation();toggleRec()" class="primary" id="rec-btn" style="font-size:12px;padding:4px 10px">${rec?'🔁 重录':'🎙 录音'}</button>
       </div>
       ${rec?'<span onclick="event.stopPropagation();deleteManual()" style="cursor:pointer;font-size:15px;padding:2px 6px;color:#d9534f;border-radius:4px" title="删除录音" onmouseover="this.style.background=\'#fee\'" onmouseout="this.style.background=\'transparent\'">✕</span>':''}
+      </div>`;
+  // ── Mute row ──
+  const useMute = (sel === 'mute');
+  html += `<div onclick="selectSource('mute')" style="display:flex;align-items:center;gap:12px;margin-top:8px;padding:6px 8px;background:#fff;border-radius:6px;cursor:pointer;${useMute?'border:2px solid #2a9d3f':'border:2px solid transparent'}">
+      <span style="font-weight:500">🔇 静音</span>
+      <span style="font-size:12px;color:#888">该句不发音，保留原视频画面</span>
       </div></div>`;
   html += `<audio id="player" controls style="width:100%;margin-top:12px;display:none" onended="onPlayerEnded()"></audio>`;
   // Sentence video preview (original segment)

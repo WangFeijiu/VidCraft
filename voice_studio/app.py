@@ -394,7 +394,7 @@ def api_select_source(name, idx):
     selected = state.get("selected_sources", {})
     data = request.get_json(silent=True) or {}
     src = data.get("source", "")
-    if src in ("clone", "manual"):
+    if src in ("clone", "manual", "mute"):
         selected[str(idx)] = src
     elif src == "":
         selected.pop(str(idx), None)
@@ -1501,7 +1501,9 @@ def _pipeline_compose(name):
             # Pick recording based on selected_sources
             sel = selected_sources.get(str(i))
             rec = None
-            if sel == "manual":
+            if sel == "mute":
+                rec = None  # Will use silent audio below
+            elif sel == "manual":
                 rec = d / "recordings" / f"s_{i:03d}.webm"
                 if not rec.exists():
                     rec = None
@@ -1547,6 +1549,17 @@ def _pipeline_compose(name):
                     str(seg_video)
                 ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 rec_wav.unlink(missing_ok=True)
+            elif sel == "mute":
+                # Mute: extract video with silent audio
+                subprocess.run([
+                    FFMPEG, "-y",
+                    "-ss", str(seg_start), "-to", str(seg_end), "-i", str(inp),
+                    "-f", "lavfi", "-i", f"anullsrc=channel_layout=mono:sample_rate={SR}",
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                    "-c:a", "aac", "-b:a", "192k", "-shortest",
+                    str(seg_video)
+                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
                 # No recording: extract segment with original audio
                 subprocess.run([
