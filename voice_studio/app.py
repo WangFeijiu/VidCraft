@@ -432,7 +432,7 @@ def api_clone_preview_all(name):
         tmp_out = os.path.join(tmpdir, "out.webm")
         subprocess.run([FFMPEG, "-y", "-f", "concat", "-safe", "0",
                         "-i", concat_file, "-c", "copy", tmp_out],
-                       check=True, capture_output=True)
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         shutil.copy2(tmp_out, str(out))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -481,7 +481,7 @@ def api_regen_clone(name, idx):
                 webm_out = d / "recordings" / f"s_{idx:03d}_clone.webm"
                 subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
                                 "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
-                               check=True, capture_output=True)
+                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 wav_out.unlink(missing_ok=True)
         else:
             # Zero-shot needs prompt_text matching the sample's actual content.
@@ -506,7 +506,7 @@ def api_regen_clone(name, idx):
                 webm_out = d / "recordings" / f"s_{idx:03d}_clone.webm"
                 subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
                                 "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
-                               check=True, capture_output=True)
+                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 wav_out.unlink(missing_ok=True)
         # If the user previously accept-cloned this sentence, the composer reads
         # s_<idx>.webm (a frozen copy of the prior clone). Refresh that copy so
@@ -590,7 +590,7 @@ def api_preview_frame(name):
     try:
         subprocess.run([FFMPEG, "-y", "-ss", f"{t:.3f}", "-i", str(inp),
                         "-frames:v", "1", "-q:v", "3", str(out)],
-                       check=True, capture_output=True)
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except subprocess.CalledProcessError:
         return ("", 500)
     return send_file(str(out), mimetype="image/jpeg")
@@ -665,7 +665,7 @@ def api_sentence_clip(name, idx):
             str(out)
         ]
         try:
-            r = subprocess.run(cmd, check=True, capture_output=True)
+            r = subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             # If output is still tiny, the encode silently produced nothing useful — purge it
             if out.exists() and out.stat().st_size < 1024:
                 out.unlink(missing_ok=True)
@@ -1185,7 +1185,7 @@ def api_voice_clone(name):
     f.save(str(raw_path))
     subprocess.run([FFMPEG, "-y", "-i", str(raw_path),
                     "-ar", "24000", "-ac", "1", "-f", "wav", str(wav_path)],
-                   check=True, capture_output=True)
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     raw_path.unlink(missing_ok=True)
     save_state(name, stage="cloning", msg="音色克隆中...", clone_progress=[0, 0], clone_prompt_text=prompt_text)
     threading.Thread(target=_pipeline_voice_clone, args=(name, prompt_text, ""), daemon=True).start()
@@ -1269,7 +1269,7 @@ def api_voice_preview(name):
             torchaudio.save(str(wav_out), result["tts_speech"], model.sample_rate)
             subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
                             "-c:a", "libopus", "-b:a", "64k", str(cache_path)],
-                           check=True, capture_output=True)
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             wav_out.unlink(missing_ok=True)
         if cache_path.exists():
             return send_file(str(cache_path), mimetype="audio/webm")
@@ -1301,14 +1301,14 @@ def api_save_voice():
     f.save(str(raw_path))
     subprocess.run([FFMPEG, "-y", "-i", str(raw_path),
                     "-ar", "24000", "-ac", "1", "-f", "wav", str(wav_path)],
-                   check=True, capture_output=True)
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     raw_path.unlink(missing_ok=True)
 
     # Use the original recording as preview (no TTS generation)
     preview_path = voice_dir / "preview.webm"
     subprocess.run([FFMPEG, "-y", "-i", str(wav_path),
                     "-c:a", "libopus", "-b:a", "64k", str(preview_path)],
-                   check=True, capture_output=True)
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Save metadata
     meta = {"id": voice_id, "name": voice_name,
@@ -1378,7 +1378,7 @@ def _pipeline_transcribe(name):
         subprocess.run([FFMPEG, "-y", "-i", str(inp),
                         "-vn", "-ar", "16000", "-ac", "1",
                         "-c:a", "pcm_s16le", str(d/"audio_16k.wav")],
-                       check=True, capture_output=True)
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # Get duration
         probe = subprocess.run(
             [FFMPEG, "-i", str(inp)],
@@ -1473,7 +1473,7 @@ def _pipeline_compose(name):
                 wav_tmp = tmp_dir / f"rec_{seg_idx}.wav"
                 subprocess.run([FFMPEG, "-y", "-i", str(rec), "-ar", str(SR),
                                 "-ac", "1", "-c:a", "pcm_s16le", str(wav_tmp)],
-                               check=True, capture_output=True)
+                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 audio, _ = sf.read(str(wav_tmp))
                 wav_tmp.unlink(missing_ok=True)
                 if audio.ndim > 1: audio = audio.mean(axis=1)
@@ -1498,7 +1498,7 @@ def _pipeline_compose(name):
                     "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                     "-c:a", "aac", "-b:a", "192k",
                     str(seg_video)
-                ], check=True, capture_output=True)
+                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 rec_wav.unlink(missing_ok=True)
             else:
                 # No recording: extract segment with original audio
@@ -1508,7 +1508,7 @@ def _pipeline_compose(name):
                     "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                     "-c:a", "aac", "-b:a", "192k",
                     str(seg_video)
-                ], check=True, capture_output=True)
+                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             segment_files.append(seg_video)
             srt_entries.append({"idx": seg_idx + 1, "start": time_offset,
@@ -1527,7 +1527,7 @@ def _pipeline_compose(name):
         subprocess.run([
             FFMPEG, "-y", "-f", "concat", "-safe", "0",
             "-i", str(concat_list), "-c", "copy", str(concat_video)
-        ], check=True, capture_output=True)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Generate compressed timeline SRT
         srt = d / "final.srt"
@@ -1546,7 +1546,7 @@ def _pipeline_compose(name):
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
             str(d / "final.mp4")
-        ], check=True, capture_output=True)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Cleanup
         import shutil
@@ -1653,7 +1653,7 @@ def _pipeline_voice_clone(name, prompt_text, voice_id=""):
                     webm_out = d / "recordings" / f"s_{i+1:03d}_clone.webm"
                     subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
                                     "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
-                                   check=True, capture_output=True)
+                                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     wav_out.unlink(missing_ok=True)
                 save_state(name, stage="cloning",
                            msg=f"音色克隆中 {i+1}/{total}...",
@@ -1679,7 +1679,7 @@ def _pipeline_voice_clone(name, prompt_text, voice_id=""):
                     webm_out = d / "recordings" / f"s_{i+1:03d}_clone.webm"
                     subprocess.run([FFMPEG, "-y", "-i", str(wav_out),
                                     "-c:a", "libopus", "-b:a", "64k", str(webm_out)],
-                                   check=True, capture_output=True)
+                                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     wav_out.unlink(missing_ok=True)
                 save_state(name, stage="cloning",
                            msg=f"音色克隆中 {i+1}/{total}...",
@@ -1823,7 +1823,7 @@ def _pipeline_ve_delete(name, ranges):
                             "-ss", str(s), "-to", str(e),
                             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k",
-                            str(seg)], check=True, capture_output=True)
+                            str(seg)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             seg_files.append(seg)
 
         out = d / "input_edited.mp4"
@@ -1901,7 +1901,7 @@ def _reencode_to(path_in, path_out, width, height, extra_args=None):
     if extra_args:
         cmd.extend(extra_args)
     cmd.append(str(path_out))
-    subprocess.run(cmd, check=True, capture_output=True)
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def _ffmpeg_concat_images(image_files_with_dur, output_path, vf, extra_args=None):
     """Concat images with durations into a video. Handles non-ASCII paths."""
@@ -1926,7 +1926,7 @@ def _ffmpeg_concat_images(image_files_with_dur, output_path, vf, extra_args=None
         if extra_args:
             cmd.extend(extra_args)
         cmd.append(str(output_path))
-        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1945,7 +1945,7 @@ def _ffmpeg_concat(segment_paths, output_path):
         tmp_out = os.path.join(tmpdir, "out.mp4")
         subprocess.run([FFMPEG, "-y", "-f", "concat", "-safe", "0",
                         "-i", concat_file, "-c", "copy", tmp_out],
-                       check=True, capture_output=True)
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         shutil.copy2(tmp_out, str(output_path))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -1958,7 +1958,7 @@ def _normalize_video(path_in, path_out):
                     "-c:a", "aac", "-b:a", "192k",
                     "-movflags", "+faststart",
                     str(path_out)],
-                   check=True, capture_output=True)
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def _pipeline_ve_insert(name, pos, mode):
     d = pd(name)
@@ -1978,13 +1978,13 @@ def _pipeline_ve_insert(name, pos, mode):
                                 f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"),
                         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                        str(part1)], check=True, capture_output=True)
+                        str(part1)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(pos),
                         "-vf", (f"scale={ow}:{oh}:force_original_aspect_ratio=decrease,"
                                 f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"),
                         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                        str(part2)], check=True, capture_output=True)
+                        str(part2)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Re-encode insert segment to match original resolution (handles AVI/MKV/MOV etc.)
         seg_enc = d / "_seg_enc.mp4"
@@ -1993,7 +1993,7 @@ def _pipeline_ve_insert(name, pos, mode):
                                 f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"),
                         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                        str(seg_enc)], check=True, capture_output=True)
+                        str(seg_enc)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Concat: part1 + segment + part2 (all same resolution, codec, fps)
         out = d / "input_edited.mp4"
@@ -2032,7 +2032,7 @@ def _pipeline_ve_speedup(name, start, end, rate):
                                     f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"),
                             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part1)], check=True, capture_output=True)
+                            str(part1)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # speed segment: start → end
         subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(start), "-to", str(end),
                         "-an",
@@ -2040,13 +2040,13 @@ def _pipeline_ve_speedup(name, start, end, rate):
                                 f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"),
                         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-r", "25", "-pix_fmt", "yuv420p",
-                        str(speed_raw)], check=True, capture_output=True)
+                        str(speed_raw)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # Speed up (remove audio with -an, use setpts)
         subprocess.run([FFMPEG, "-y", "-i", str(speed_raw),
                         "-vf", f"setpts=PTS/{rate}",
                         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-pix_fmt", "yuv420p",
-                        str(speed_up)], check=True, capture_output=True)
+                        str(speed_up)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # part2: end → total
         if end < total_dur - 0.1:
             subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(end),
@@ -2054,7 +2054,7 @@ def _pipeline_ve_speedup(name, start, end, rate):
                                     f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"),
                             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part2)], check=True, capture_output=True)
+                            str(part2)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Get speed_up segment duration
         _, _, new_seg_dur = _get_video_info(str(speed_up))
@@ -2114,7 +2114,7 @@ def _pipeline_ve_speedup_merge(name, audio_path):
                                     f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"),
                             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part1)], check=True, capture_output=True)
+                            str(part1)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # speed segment: new_start → new_end (no audio)
         subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(new_start), "-to", str(new_end),
                         "-an",
@@ -2122,7 +2122,7 @@ def _pipeline_ve_speedup_merge(name, audio_path):
                                 f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"),
                         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-pix_fmt", "yuv420p",
-                        str(speed_seg)], check=True, capture_output=True)
+                        str(speed_seg)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # part2: new_end → end
         if new_end < total_dur - 0.1:
             subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(new_end),
@@ -2130,14 +2130,14 @@ def _pipeline_ve_speedup_merge(name, audio_path):
                                     f"pad={ow}:{oh}:(ow-iw)/2:(oh-ih)/2:black"),
                             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part2)], check=True, capture_output=True)
+                            str(part2)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Merge audio with speed segment
         subprocess.run([FFMPEG, "-y",
                         "-i", str(speed_seg), "-i", audio_path,
                         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                         "-shortest",
-                        str(merged_seg)], check=True, capture_output=True)
+                        str(merged_seg)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Concat all parts
         segments = []
@@ -2214,7 +2214,7 @@ def _pipeline_ve_insert_images(name, pos, subtitles, has_voice):
                         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-c:a", "aac", "-b:a", "192k", "-shortest",
                         str(d / "insert_segment.mp4")
-                       ], check=True, capture_output=True)
+                       ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Now insert into original
         (d / "insert_images").mkdir(exist_ok=True)  # already exists
@@ -2368,7 +2368,7 @@ def api_i2v_voice(name):
     subprocess.run([FFMPEG, "-y", "-i", str(raw),
                     "-ar", "24000", "-ac", "1", "-f", "wav",
                     str(d / "voice_sample.wav")],
-                   check=True, capture_output=True)
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     raw.unlink(missing_ok=True)
     i2v_save(name, voice_ready=True)
     return jsonify({"ok": True})
@@ -2645,7 +2645,7 @@ def _get_i2v_voice_settings(d):
                 subprocess.run([FFMPEG, "-y", "-i", str(backup),
                                 "-ar", "24000", "-ac", "1", "-f", "wav",
                                 str(voice_sample)],
-                               check=True, capture_output=True)
+                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 backup.unlink(missing_ok=True)
                 import soundfile as _sf_check2
                 _sf_check2.info(str(voice_sample))
@@ -2934,7 +2934,7 @@ def _pipeline_convert(name, fmt, res):
         cmd += ["-c:v", cfg["codec"], "-preset", "medium", "-crf", "20",
                 "-c:a", cfg["audio"], "-b:a", "192k",
                 "-pix_fmt", "yuv420p", str(out)]
-        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         save_state(name, stage="done", msg=f"转换完成 ({fmt} {res})")
     except Exception as e:
@@ -3301,7 +3301,7 @@ def _pipeline_tool_ve_delete(sid, ranges):
             subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(s), "-to", str(e),
                             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", str(seg)],
-                           check=True, capture_output=True)
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             seg_files.append(seg)
 
         out = d / "_result_out.mp4"
@@ -3489,7 +3489,7 @@ def _pipeline_tool_ve_concat(sid, segment_paths):
                                 "-pix_fmt", "yuv420p",
                                 "-c:a", "aac", "-b:a", "192k",
                                 tmp_out],
-                               check=True, capture_output=True)
+                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 shutil.copy2(tmp_out, str(out))
             finally:
                 shutil.rmtree(tmpdir, ignore_errors=True)
@@ -3529,7 +3529,7 @@ def _pipeline_tool_convert(sid, fmt, res):
         if vf_parts: cmd += ["-vf", ",".join(vf_parts)]
         cmd += ["-c:v", cfg["codec"], "-preset", "medium", "-crf", "20",
                 "-c:a", cfg["audio"], "-b:a", "192k", "-pix_fmt", "yuv420p", str(out)]
-        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         _tool_save_state(sid, stage="done", msg=f"转换完成 ({fmt})", result_file=out_name)
     except Exception as e:
@@ -3553,21 +3553,21 @@ def _pipeline_tool_speedup(sid, start, end, rate):
             subprocess.run([FFMPEG, "-y", "-i", str(inp), "-t", str(start),
                             "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part1)], check=True, capture_output=True)
+                            str(part1)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(start), "-to", str(end),
                         "-an", "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-r", "25", "-pix_fmt", "yuv420p",
-                        str(speed_raw)], check=True, capture_output=True)
+                        str(speed_raw)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run([FFMPEG, "-y", "-i", str(speed_raw),
                         "-vf", f"setpts=PTS/{rate}",
                         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-pix_fmt", "yuv420p",
-                        str(speed_up)], check=True, capture_output=True)
+                        str(speed_up)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if end < total_dur - 0.1:
             subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(end),
                             "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part2)], check=True, capture_output=True)
+                            str(part2)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         _, _, new_seg_dur = _get_video_info(str(speed_up))
 
@@ -3622,20 +3622,20 @@ def _pipeline_tool_speedup_merge(sid, audio_path):
             subprocess.run([FFMPEG, "-y", "-i", str(inp), "-t", str(new_start),
                             "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part1)], check=True, capture_output=True)
+                            str(part1)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(new_start), "-to", str(new_end),
                         "-an", "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-pix_fmt", "yuv420p",
-                        str(speed_seg)], check=True, capture_output=True)
+                        str(speed_seg)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if new_end < total_dur - 0.1:
             subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(new_end),
                             "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part2)], check=True, capture_output=True)
+                            str(part2)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         subprocess.run([FFMPEG, "-y", "-i", str(speed_seg), "-i", audio_path,
                         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
-                        str(merged_seg)], check=True, capture_output=True)
+                        str(merged_seg)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         segments = []
         if new_start > 0:
@@ -3675,23 +3675,23 @@ def _pipeline_tool_replace_audio(sid, audio_path, start, end):
             subprocess.run([FFMPEG, "-y", "-i", str(inp), "-t", str(start),
                             "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part1)], check=True, capture_output=True)
+                            str(part1)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # segment video: start → end (no audio)
         subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(start), "-to", str(end),
                         "-an", "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                         "-r", "25", "-pix_fmt", "yuv420p",
-                        str(seg_video)], check=True, capture_output=True)
+                        str(seg_video)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # part2: after end
         if end < total_dur - 0.1:
             subprocess.run([FFMPEG, "-y", "-i", str(inp), "-ss", str(end),
                             "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-c:a", "aac", "-b:a", "192k", "-r", "25", "-pix_fmt", "yuv420p",
-                            str(part2)], check=True, capture_output=True)
+                            str(part2)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Merge new audio with segment video
         subprocess.run([FFMPEG, "-y", "-i", str(seg_video), "-i", audio_path,
                         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
-                        str(merged_seg)], check=True, capture_output=True)
+                        str(merged_seg)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Concatenate
         segments = []
