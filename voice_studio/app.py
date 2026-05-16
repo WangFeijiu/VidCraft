@@ -1058,46 +1058,54 @@ def _pipeline_match(name, user_text):
             'progress': 100
         }, namespace='/')
 
-        # Validate matching results: enforce strictly increasing original ranges.
-        # If LLM returned overlapping/out-of-order ranges, clamp them.
-        last_orig_end = -1
-        validated = {}
-        for i in sorted(result_map.keys()):
-            r = result_map[i]
-            if r["orig_start"] <= last_orig_end:
-                r["orig_start"] = last_orig_end + 1
-            if r["orig_start"] >= total_orig:
-                break
-            if r["orig_end"] < r["orig_start"]:
-                r["orig_end"] = r["orig_start"]
-            if r["orig_end"] >= total_orig:
-                r["orig_end"] = total_orig - 1
-            r["start"] = sentences[r["orig_start"]]["start"]
-            r["end"] = sentences[r["orig_end"]]["end"]
-            last_orig_end = r["orig_end"]
-            validated[i] = r
-        result_map = validated
-
-        # Build final result using original timestamps directly.
-        # No scaling, no redistribution — just use the matched original times.
+        # Build final result: allow multiple uploaded sentences to share the same
+        # original sentence range (splits). Group consecutive sentences that map
+        # to the same or overlapping original range, then split the time evenly.
         video_end = sentences[-1]["end"] if sentences else 0
         raw = []
         for i in range(total_user):
             if i in result_map:
                 r = result_map[i]
+                orig_s = max(0, min(r["orig_start"], total_orig - 1))
+                orig_e = max(orig_s, min(r["orig_end"], total_orig - 1))
                 raw.append({
                     "text": user_text[i],
-                    "start": r["start"],
-                    "end": r["end"],
-                    "source": list(range(r["orig_start"]+1, r["orig_end"]+2))
+                    "start": sentences[orig_s]["start"],
+                    "end": sentences[orig_e]["end"],
+                    "orig_start": orig_s,
+                    "orig_end": orig_e,
+                    "source": list(range(orig_s + 1, orig_e + 2))
                 })
             else:
                 raw.append({
                     "text": user_text[i],
                     "start": None,
                     "end": None,
+                    "orig_start": None,
+                    "orig_end": None,
                     "source": []
                 })
+
+        # Split overlapping time ranges: group consecutive sentences that share
+        # the same time span, then divide it equally among them.
+        i = 0
+        while i < len(raw):
+            if raw[i]["start"] is None:
+                i += 1
+                continue
+            group_start = raw[i]["start"]
+            group_end = raw[i]["end"]
+            j = i + 1
+            while j < len(raw) and raw[j]["start"] is not None and raw[j]["start"] < group_end:
+                group_end = max(group_end, raw[j]["end"])
+                j += 1
+            count = j - i
+            if count > 1:
+                dur_each = (group_end - group_start) / count
+                for k in range(count):
+                    raw[i + k]["start"] = round(group_start + k * dur_each, 2)
+                    raw[i + k]["end"] = round(group_start + (k + 1) * dur_each, 2)
+            i = j
 
         # Fill unmatched: interpolate into gaps between matched neighbours
         i = 0
