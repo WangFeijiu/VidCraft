@@ -1064,13 +1064,16 @@ def _pipeline_match(name, user_text):
         validated = {}
         for i in sorted(result_map.keys()):
             r = result_map[i]
-            # Ensure orig_start is after the previous sentence's orig_end
             if r["orig_start"] <= last_orig_end:
                 r["orig_start"] = last_orig_end + 1
-                r["start"] = sentences[r["orig_start"]]["start"]
+            if r["orig_start"] >= total_orig:
+                break
             if r["orig_end"] < r["orig_start"]:
                 r["orig_end"] = r["orig_start"]
-                r["end"] = sentences[r["orig_end"]]["end"]
+            if r["orig_end"] >= total_orig:
+                r["orig_end"] = total_orig - 1
+            r["start"] = sentences[r["orig_start"]]["start"]
+            r["end"] = sentences[r["orig_end"]]["end"]
             last_orig_end = r["orig_end"]
             validated[i] = r
         result_map = validated
