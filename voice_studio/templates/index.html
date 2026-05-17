@@ -1429,6 +1429,7 @@ async function uploadSubtitles() {
         if(ok) {
           await fetch(API+'/api/project/'+curProj+'/sentences', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'precise', sentences:parsed})});
           await fetch(API+'/api/project/'+curProj+'/select-version', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'precise'})});
+          await loadSentenceVersions();
           await refreshWork();
           toast(`已导入 ${parsed.length} 句精准字幕，可编辑后进入录音`,'success');
           return;
@@ -1444,6 +1445,7 @@ async function uploadSubtitles() {
           const parsed = a.map(s => ({text: s.text||'', start: s.start, end: s.end}));
           await fetch(API+'/api/project/'+curProj+'/sentences', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'precise', sentences:parsed})});
           await fetch(API+'/api/project/'+curProj+'/select-version', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'precise'})});
+          await loadSentenceVersions();
           await refreshWork();
           toast(`已导入 ${parsed.length} 句精准字幕，可编辑后进入录音`,'success');
           return;
