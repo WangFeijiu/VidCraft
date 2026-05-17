@@ -141,6 +141,13 @@ def ts(s):
     if ms == 1000: sec += 1; ms = 0
     return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
 
+def _disposition(name, ext):
+    """Build a Content-Disposition header that works with non-ASCII filenames."""
+    from urllib.parse import quote
+    safe_ascii = re.sub(r'[^\x20-\x7e]', '_', f"{name}.{ext}")
+    encoded = quote(f"{name}.{ext}", safe='')
+    return f"attachment; filename=\"{safe_ascii}\"; filename*=UTF-8''{encoded}"
+
 # ── Routes: pages ───────────────────────────────────────────────────
 @app.route("/")
 def index():
@@ -774,17 +781,17 @@ def api_export(name):
             lines.append(f"{i}\n{ts(seg['start'])} --> {ts(seg['end'])}\n{seg['text']}\n")
         content = "\n".join(lines)
         return Response(content, mimetype="text/plain; charset=utf-8",
-                        headers={"Content-Disposition": f'attachment; filename="{name}.srt"'})
+                        headers={"Content-Disposition": _disposition(name, "srt")})
 
     elif fmt == "txt":
         content = "\n".join(seg["text"] for seg in sentences)
         return Response(content, mimetype="text/plain; charset=utf-8",
-                        headers={"Content-Disposition": f'attachment; filename="{name}.txt"'})
+                        headers={"Content-Disposition": _disposition(name, "txt")})
 
     else:  # json
         content = json.dumps(sentences, ensure_ascii=False, indent=2)
         return Response(content, mimetype="application/json",
-                        headers={"Content-Disposition": f'attachment; filename="{name}.json"'})
+                        headers={"Content-Disposition": _disposition(name, "json")})
 
 # ── Routes: LLM config ─────────────────────────────────────────────
 @app.route("/api/llm-config")
