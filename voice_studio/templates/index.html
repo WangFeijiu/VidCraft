@@ -1109,9 +1109,9 @@ function renderEditor(body) {
       </div>
     </div>
   </div>`;
-  html += `<p style="margin-bottom:8px;color:#888;font-size:13px">共 ${sentences.length} 句 · 勾选连续句子可合并 · 时间戳可直接编辑</p>`;
+  html += `<p style="margin-bottom:8px;color:#888;font-size:13px">共 ${sentences.length} 句 · 勾选连续句子可合并 · 时间戳可直接编辑 · 行末可插入/删除</p>`;
   html += sentences.map((s,i) =>
-    `<div class="sent-item" id="si-${i}"><input type="checkbox" class="chk" data-i="${i}" onchange="onCheckMerge(${i},this.checked)"><span class="idx">${i+1}</span><textarea class="sent-row" rows="1" data-i="${i}" oninput="autoGrow(this)">${s.text}</textarea><span class="dur"><input type="text" class="time-input" value="${fmtSS(s.start)}" data-i="${i}" data-field="start" onchange="onTimeChange(${i},'start',this.value)" style="width:52px;text-align:center;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px">→<input type="text" class="time-input" value="${fmtSS(s.end)}" data-i="${i}" data-field="end" onchange="onTimeChange(${i},'end',this.value)" style="width:52px;text-align:center;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px"></span></div>`
+    `<div class="sent-item" id="si-${i}"><input type="checkbox" class="chk" data-i="${i}" onchange="onCheckMerge(${i},this.checked)"><span class="idx">${i+1}</span><textarea class="sent-row" rows="1" data-i="${i}" oninput="autoGrow(this)">${s.text}</textarea><span class="dur"><input type="text" class="time-input" value="${fmtSS(s.start)}" data-i="${i}" data-field="start" onchange="onTimeChange(${i},'start',this.value)" style="width:52px;text-align:center;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px">→<input type="text" class="time-input" value="${fmtSS(s.end)}" data-i="${i}" data-field="end" onchange="onTimeChange(${i},'end',this.value)" style="width:52px;text-align:center;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px"></span><span style="display:inline-flex;gap:2px;margin-left:4px"><button onclick="insertSentenceAfter(${i})" title="在此句后插入新句" style="font-size:14px;padding:2px 6px;background:#e8f4ff;color:#4a9eff;border:1px solid #b6d9ff;border-radius:3px;cursor:pointer">+</button><button onclick="deleteSentenceRow(${i})" title="删除此句" style="font-size:14px;padding:2px 6px;background:#fee;color:#d9534f;border:1px solid #f5c2c2;border-radius:3px;cursor:pointer">✕</button></span></div>`
   ).join('');
   html += `<div style="margin-top:16px"><button class="primary" onclick="saveSentences(true)">💾 保存字幕，进入录音</button></div>`;
   body.innerHTML = html;
@@ -1146,6 +1146,42 @@ function mergeSelected() {
   const merged = {text: sorted.map(i=>sentences[i].text).join(' '), start: sentences[sorted[0]].start, end: sentences[sorted[sorted.length-1]].end};
   sentences.splice(sorted[0], sorted.length, merged);
   renderEditor(document.getElementById('work-body'));
+}
+function insertSentenceAfter(i) {
+  // Insert a new empty sentence after index i. Split the time gap between
+  // current sentence's end and next sentence's start (or current.end + 1 if last).
+  const cur = sentences[i];
+  const next = sentences[i+1];
+  let newStart, newEnd;
+  if(next) {
+    // Steal half of cur's duration: split [cur.start, cur.end] so cur takes first half
+    const mid = (cur.start + cur.end) / 2;
+    newStart = mid;
+    newEnd = cur.end;
+    cur.end = mid;
+  } else {
+    // Last sentence: append after with same duration as current (or 2s default)
+    const dur = Math.min(cur.end - cur.start, 2);
+    newStart = cur.end;
+    newEnd = cur.end + dur;
+  }
+  sentences.splice(i+1, 0, {text: '', start: newStart, end: newEnd});
+  renderEditor(document.getElementById('work-body'));
+  toast('已插入新句，请编辑文本和时间','success');
+}
+async function deleteSentenceRow(i) {
+  if(!await showConfirm('删除字幕', `确定删除第 ${i+1} 句字幕？\n\n"${(sentences[i].text||'').slice(0,30)}"`)) return;
+  // Give the deleted time to the next sentence (extend its start backwards)
+  // or to the previous sentence (extend its end forwards) if last
+  const cur = sentences[i];
+  if(i+1 < sentences.length) {
+    sentences[i+1].start = cur.start;
+  } else if(i > 0) {
+    sentences[i-1].end = cur.end;
+  }
+  sentences.splice(i, 1);
+  renderEditor(document.getElementById('work-body'));
+  toast('已删除','success');
 }
 async function saveSentences(enterRecording) {
   // Read textarea values
